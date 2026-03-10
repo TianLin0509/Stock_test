@@ -1,0 +1,12 @@
+# API Keys — 绝对不能提交！
+.streamlit/secrets.toml
+secrets.toml.template
+
+# Python
+__pycache__/
+*.pyc
+.env
+
+# IDE
+.vscode/
+.idea/
