@@ -388,6 +388,45 @@ def call_ai(client: OpenAI, cfg: dict, prompt: str,
         return "", f"AI 调用异常：{err[:120]}"
 
 
+def call_ai_stream(client: OpenAI, cfg: dict, prompt: str,
+                   system: str = "", max_tokens: int = 3200):
+    """
+    流式调用 AI 模型，yield 文本片段。
+    配合 st.write_stream() 实现打字机效果。
+    """
+    messages = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": prompt})
+
+    extra: dict = {}
+    if cfg.get("supports_search") and cfg.get("provider") == "qwen":
+        extra["extra_body"] = {"enable_search": True}
+    elif cfg.get("supports_search") and cfg.get("provider") == "zhipu":
+        extra["tools"] = [{"type": "web_search", "web_search": {"enable": True}}]
+
+    try:
+        stream = client.chat.completions.create(
+            model=cfg["model"],
+            messages=messages,
+            max_tokens=max_tokens,
+            stream=True,
+            **extra,
+        )
+        for chunk in stream:
+            if chunk.choices and chunk.choices[0].delta.content:
+                yield chunk.choices[0].delta.content
+
+    except AuthenticationError:
+        yield "\n\n⚠️ API Key 认证失败，请检查密钥是否正确或已过期"
+    except RateLimitError:
+        yield "\n\n⚠️ 调用频率或额度超限，请稍后重试或切换其他模型"
+    except APIConnectionError as e:
+        yield f"\n\n⚠️ 网络连接失败：{e}"
+    except Exception as e:
+        yield f"\n\n⚠️ AI 调用异常：{str(e)[:120]}"
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # TUSHARE DATA LAYER
 # ══════════════════════════════════════════════════════════════════════════════
@@ -558,39 +597,7 @@ def get_financial(ts_code: str) -> tuple[str, str | None]:
            ("; ".join(errs) if errs else None)
 
 
-@st.cache_data(ttl=300, show_spinner=False)
-def get_news(ts_code: str, name: str) -> tuple[list, str | None]:
-    pro = get_pro()
-    if pro is None:
-        return [], _ts_err
-    results = []
-    try:
-        df = pro.stk_news(ts_code=ts_code, fields="datetime,title")
-        if df is not None and not df.empty:
-            for _, row in df.head(12).iterrows():
-                results.append({"发布时间": str(row.get("datetime","")),
-                                 "新闻标题": str(row.get("title",""))})
-            return results, None
-    except Exception:
-        pass
-    try:
-        code6 = to_code6(ts_code)
-        df2 = pro.news(
-            src="sina",
-            start_date=(datetime.now()-timedelta(days=14)).strftime("%Y-%m-%d %H:%M:%S"),
-            end_date=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            fields="datetime,title"
-        )
-        if df2 is not None and not df2.empty:
-            mask = df2["title"].str.contains(name[:4], na=False) | \
-                   df2["title"].str.contains(code6, na=False)
-            for _, row in df2[mask].head(10).iterrows():
-                results.append({"发布时间": str(row.get("datetime","")),
-                                 "新闻标题": str(row.get("title",""))})
-    except Exception as e:
-        return results, f"新闻获取受限（{e}），AI将依赖内部知识分析"
-
-    return results, None
+## get_news 已弃用 — 新闻信息完全由 AI 联网搜索获取，不再依赖 Tushare 新闻接口
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -709,22 +716,28 @@ def price_summary(df: pd.DataFrame) -> str:
 # AI ANALYSIS MODULES
 # ══════════════════════════════════════════════════════════════════════════════
 
-def analyze_expectation_gap(client, cfg, name, ts_code, info, news) -> tuple[str,str|None]:
-    news_text = "\n".join(f"[{n.get('发布时间','')}] {n.get('新闻标题','')}"
-                          for n in news[:12]) or "暂无最新新闻"
-    info_str = json.dumps({k:v for k,v in info.items()}, ensure_ascii=False)[:1400]
-    prompt = f"""你是中国顶级买方研究院首席分析师，专精A股预期差挖掘与市场博弈分析。
+def build_expectation_prompt(name, ts_code, info) -> tuple[str, str]:
+    """构建预期差分析 prompt，返回 (prompt, system)。不再依赖 Tushare 新闻。"""
+    today_str = datetime.now().strftime("%Y年%m月%d日")
+    future_start = datetime.now().strftime("%Y年%m月")
+    future_end = (datetime.now() + timedelta(days=90)).strftime("%Y年%m月")
+    info_str = json.dumps({k: v for k, v in info.items()}, ensure_ascii=False)[:1400]
 
-## 分析标的：{name}（{to_code6(ts_code)}）
+    system = (f"你是中国顶级买方研究院首席分析师，专精A股预期差挖掘与市场博弈分析。"
+              f"⚠️ 今天的日期是 {today_str}。你的所有分析、时间判断、事件日历都必须以这个日期为锚点。"
+              f"严禁出现任何早于今天日期的「未来」事件。")
+
+    prompt = f"""## 分析标的：{name}（{to_code6(ts_code)}）
+## 当前日期：{today_str}
 
 ## 公司基本信息
 {info_str}
 
-## 近期新闻动态
-{news_text}
-
 ---
-请结合上述信息及搜索到的最新信息，进行深度预期差分析（输出中文）：
+⚠️ 重要提示：本系统不提供新闻数据，你需要通过联网搜索功能，主动搜索 {name} 最近1个月内的最新新闻、公告、研报、政策动态。
+请确保你的分析基于最新信息，而非过时数据。
+
+请结合搜索到的最新信息，进行深度预期差分析（输出中文）：
 
 ### 一、当前核心炒作逻辑
 详述当前市场炒作该股的核心叙事——是主题/概念驱动、业绩拐点、政策催化，还是资金博弈？逻辑强度与可持续性如何？
@@ -739,7 +752,8 @@ def analyze_expectation_gap(client, cfg, name, ts_code, info, news) -> tuple[str
 **🔴 低预期风险（潜在负向惊喜）：**
 - （列出1-2个可能不及预期的风险因素）
 
-### 四、近期催化事件日历（未来1~3个月）
+### 四、近期催化事件日历（{future_start} ~ {future_end}）
+⚠️ 所有日期必须晚于 {today_str}，严禁出现过去的日期。如果某事件时间不确定，请写"待定"。
 | 预计时间 | 催化事件 | 影响方向 | 重要性 |
 |--------|---------|---------|------|
 
@@ -752,13 +766,19 @@ def analyze_expectation_gap(client, cfg, name, ts_code, info, news) -> tuple[str
 
 ### 六、综合结论（2-3句话）
 """
-    return call_ai(client, cfg, prompt, max_tokens=3200)
+    return prompt, system
 
 
-def analyze_trend(client, cfg, name, ts_code, price_smry, capital, dragon) -> tuple[str,str|None]:
-    prompt = f"""你是资深A股技术分析师，深谙量价关系、主力行为与资金博弈。
+def analyze_expectation_gap(client, cfg, name, ts_code, info, news=None) -> tuple[str, str | None]:
+    """兼容旧调用签名，内部使用 build_expectation_prompt"""
+    prompt, system = build_expectation_prompt(name, ts_code, info)
+    return call_ai(client, cfg, prompt, system=system, max_tokens=3200)
 
-## 分析标的：{name}（{to_code6(ts_code)}）
+
+def build_trend_prompt(name, ts_code, price_smry, capital, dragon) -> tuple[str, str]:
+    """构建趋势分析 prompt，返回 (prompt, system)"""
+    system = "你是资深A股技术分析师，深谙量价关系、主力行为与资金博弈。"
+    prompt = f"""## 分析标的：{name}（{to_code6(ts_code)}）
 
 ## K线及量价数据
 {price_smry}
@@ -807,14 +827,19 @@ def analyze_trend(client, cfg, name, ts_code, price_smry, capital, dragon) -> tu
 
 **【案例3】**（同格式）
 """
-    return call_ai(client, cfg, prompt, max_tokens=3500)
+    return prompt, system
 
 
-def analyze_fundamentals(client, cfg, name, ts_code, info, financial) -> tuple[str,str|None]:
-    info_str = json.dumps({k:v for k,v in info.items()}, ensure_ascii=False)[:1000]
-    prompt = f"""你是专业A股基本面研究员，精通财务分析与估值体系。
+def analyze_trend(client, cfg, name, ts_code, price_smry, capital, dragon) -> tuple[str, str | None]:
+    prompt, system = build_trend_prompt(name, ts_code, price_smry, capital, dragon)
+    return call_ai(client, cfg, prompt, system=system, max_tokens=3500)
 
-## 分析标的：{name}（{to_code6(ts_code)}）
+
+def build_fundamentals_prompt(name, ts_code, info, financial) -> tuple[str, str]:
+    """构建基本面分析 prompt，返回 (prompt, system)"""
+    system = "你是专业A股基本面研究员，精通财务分析与估值体系。"
+    info_str = json.dumps({k: v for k, v in info.items()}, ensure_ascii=False)[:1000]
+    prompt = f"""## 分析标的：{name}（{to_code6(ts_code)}）
 
 ## 基本信息
 {info_str}
@@ -865,7 +890,12 @@ def analyze_fundamentals(client, cfg, name, ts_code, info, financial) -> tuple[s
 **筛选结论：** ✅通过 / ❌不通过 / ⚠️谨慎
 **核心理由：**
 """
-    return call_ai(client, cfg, prompt, max_tokens=3200)
+    return prompt, system
+
+
+def analyze_fundamentals(client, cfg, name, ts_code, info, financial) -> tuple[str, str | None]:
+    prompt, system = build_fundamentals_prompt(name, ts_code, info, financial)
+    return call_ai(client, cfg, prompt, system=system, max_tokens=3200)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -989,7 +1019,8 @@ def show_results(client, cfg):
     with tab1:
         content = r.get("expectation", "")
         if content:
-            st.markdown(f'<div class="analysis-wrap">{content}</div>', unsafe_allow_html=True)
+            with st.container(border=True):
+                st.markdown(content)
         else:
             st.info("点击「开始分析」后，预期差分析结果将显示在这里。")
 
@@ -998,12 +1029,14 @@ def show_results(client, cfg):
         content = r.get("trend", "")
         if content:
             st.markdown("---")
-            st.markdown(f'<div class="analysis-wrap">{content}</div>', unsafe_allow_html=True)
+            with st.container(border=True):
+                st.markdown(content)
 
     with tab3:
         content = r.get("fundamentals", "")
         if content:
-            st.markdown(f'<div class="analysis-wrap">{content}</div>', unsafe_allow_html=True)
+            with st.container(border=True):
+                st.markdown(content)
         else:
             st.info("基本面分析结果将显示在这里。")
 
@@ -1175,10 +1208,6 @@ def main():
             fin, e = get_financial(ts_code)
             if e: data_errors.append(e)
 
-            st.write("▶ 新闻资讯...")
-            news, e = get_news(ts_code, name)
-            if e: data_errors.append(e)
-
             st.write("▶ 主力资金流向...")
             cap, e = get_capital_flow(ts_code)
             if e: data_errors.append(e)
@@ -1214,36 +1243,40 @@ def main():
         analyses: dict[str, str] = {}
         if client:
             psmry = price_summary(df)
-            with st.status(f"🤖 {selected_model} 深度分析中（约1-3分钟）...",
-                           expanded=True) as ai_s:
-                st.write("1/3  🔍 预期差分析（搜索最新资讯）...")
-                text, err = analyze_expectation_gap(client, cfg_now, name, ts_code, info, news)
-                if err:
-                    st.markdown(f'<div class="status-banner warn">⚠️ 预期差分析失败：{err} — 建议切换模型重试</div>',
-                                unsafe_allow_html=True)
-                    text = f"⚠️ 分析失败：{err}\n\n请在左侧切换其他模型后重新分析。"
-                analyses["expectation"] = text
 
-                st.write("2/3  📈 趋势研判...")
-                text, err = analyze_trend(client, cfg_now, name, ts_code,
-                                          psmry, cap, dragon)
-                if err:
-                    st.markdown(f'<div class="status-banner warn">⚠️ 趋势分析失败：{err}</div>',
-                                unsafe_allow_html=True)
-                    text = f"⚠️ 分析失败：{err}"
-                analyses["trend"] = text
+            # ── 流式分析：进度条 + 打字机效果 ──
+            st.markdown(f"""<div class="status-banner info">
+  🤖 <strong>{selected_model} 深度分析中</strong> — 每个模块完成后即时展示，无需等待全部完成
+</div>""", unsafe_allow_html=True)
 
-                st.write("3/3  📋 基本面剖析...")
-                text, err = analyze_fundamentals(client, cfg_now, name, ts_code, info, fin)
-                if err:
-                    st.markdown(f'<div class="status-banner warn">⚠️ 基本面分析失败：{err}</div>',
-                                unsafe_allow_html=True)
-                    text = f"⚠️ 分析失败：{err}"
-                analyses["fundamentals"] = text
+            progress_bar = st.progress(0, text="🔍 1/3 预期差分析（联网搜索最新资讯）...")
 
-                ai_s.update(label="✅ AI分析完成！", state="complete")
+            # 1/3 预期差分析
+            st.markdown("#### 🔍 预期差分析")
+            prompt1, sys1 = build_expectation_prompt(name, ts_code, info)
+            text1 = st.write_stream(call_ai_stream(client, cfg_now, prompt1, system=sys1, max_tokens=3200))
+            analyses["expectation"] = text1 or ""
+            progress_bar.progress(33, text="✅ 预期差完成 · 📈 2/3 趋势研判中...")
 
-            st.success("✅ 分析完成！切换上方标签查看详情，进入「MoE辩论裁决」获取操作建议。")
+            st.markdown("---")
+
+            # 2/3 趋势研判
+            st.markdown("#### 📈 趋势研判")
+            prompt2, sys2 = build_trend_prompt(name, ts_code, psmry, cap, dragon)
+            text2 = st.write_stream(call_ai_stream(client, cfg_now, prompt2, system=sys2, max_tokens=3500))
+            analyses["trend"] = text2 or ""
+            progress_bar.progress(66, text="✅ 趋势完成 · 📋 3/3 基本面剖析中...")
+
+            st.markdown("---")
+
+            # 3/3 基本面剖析
+            st.markdown("#### 📋 基本面剖析")
+            prompt3, sys3 = build_fundamentals_prompt(name, ts_code, info, fin)
+            text3 = st.write_stream(call_ai_stream(client, cfg_now, prompt3, system=sys3, max_tokens=3200))
+            analyses["fundamentals"] = text3 or ""
+            progress_bar.progress(100, text="🎉 全部分析完成！")
+
+            st.success("✅ 分析完成！下方标签可查看完整结果，进入「MoE辩论裁决」获取操作建议。")
         else:
             st.markdown(f"""<div class="status-banner info">
   ℹ️ <strong>AI分析已跳过</strong>（API Key 未配置）。K线图已在「K线 & 趋势」标签中生成，可供参考。<br>
