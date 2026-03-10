@@ -80,13 +80,29 @@ MODEL_CONFIGS = {
         "provider":       "openrouter",
         "note":           "Gemini 2.5 Pro · 联网搜索（OpenRouter）",
     },
-    "🔷 GPT-4o · OpenAI": {
+    "💚 Gemini 3 Pro · Google": {
+        "api_key":        st.secrets.get("OPENROUTER_API_KEY", ""),
+        "base_url":       "https://openrouter.ai/api/v1",
+        "model":          "google/gemini-3-pro-preview",
+        "supports_search": True,
+        "provider":       "openrouter",
+        "note":           "Gemini 3 Pro · 最新旗舰 · 联网搜索（OpenRouter）",
+    },
+    "🔷 GPT-5.2 · OpenAI": {
+        "api_key":        st.secrets.get("OPENROUTER_API_KEY", ""),
+        "base_url":       "https://openrouter.ai/api/v1",
+        "model":          "openai/gpt-5.2",
+        "supports_search": True,
+        "provider":       "openrouter",
+        "note":           "GPT-5.2 · 最新旗舰 · 联网搜索（OpenRouter）",
+    },
+    "🔹 GPT-4o · OpenAI": {
         "api_key":        st.secrets.get("OPENROUTER_API_KEY", ""),
         "base_url":       "https://openrouter.ai/api/v1",
         "model":          "openai/gpt-4o",
         "supports_search": True,
         "provider":       "openrouter",
-        "note":           "GPT-4o · 联网搜索（OpenRouter）",
+        "note":           "GPT-4o · 经典稳定 · 联网搜索（OpenRouter）",
     },
 }
 
