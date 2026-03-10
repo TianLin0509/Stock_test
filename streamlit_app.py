@@ -72,21 +72,21 @@ MODEL_CONFIGS = {
         "provider":       "deepseek",
         "note":           "DeepSeek-V3 · 仅内部知识",
     },
-    "🟢 Gemini 3.1 Pro · Google": {
-        "api_key":        "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",
+    "🟢 Gemini 2.5 Pro · Google": {
+        "api_key":        "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",
         "base_url":       "https://openrouter.ai/api/v1",
-        "model":          "google/gemini-3.1-pro-preview",
+        "model":          "google/gemini-2.5-pro",
         "supports_search": True,
         "provider":       "openrouter",
-        "note":           "Gemini 3.1 Pro · 联网搜索（OpenRouter）",
+        "note":           "Gemini 2.5 Pro · 联网搜索（OpenRouter）",
     },
-    "🔷 GPT-5.2 · OpenAI": {
-        "api_key":        "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",
+    "🔷 GPT-4o · OpenAI": {
+        "api_key":        "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",
         "base_url":       "https://openrouter.ai/api/v1",
-        "model":          "openai/gpt-5.2",
+        "model":          "openai/gpt-4o",
         "supports_search": True,
         "provider":       "openrouter",
-        "note":           "GPT-5.2 · 联网搜索（OpenRouter）",
+        "note":           "GPT-4o · 联网搜索（OpenRouter）",
     },
 }
 
