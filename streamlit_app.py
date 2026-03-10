@@ -73,7 +73,7 @@ MODEL_CONFIGS = {
         "note":           "DeepSeek-V3 · 仅内部知识",
     },
     "🟢 Gemini 2.5 Pro · Google": {
-        "api_key":        "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",
+        "api_key":        "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",
         "base_url":       "https://openrouter.ai/api/v1",
         "model":          "google/gemini-2.5-pro",
         "supports_search": True,
@@ -81,7 +81,7 @@ MODEL_CONFIGS = {
         "note":           "Gemini 2.5 Pro · 联网搜索（OpenRouter）",
     },
     "🔷 GPT-4o · OpenAI": {
-        "api_key":        "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",
+        "api_key":        "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",
         "base_url":       "https://openrouter.ai/api/v1",
         "model":          "openai/gpt-4o",
         "supports_search": True,
