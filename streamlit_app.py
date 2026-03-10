@@ -575,7 +575,7 @@ def get_ai_client(model_name: str) -> tuple[OpenAI | None, dict | None, str | No
         if cfg.get("provider") == "openrouter":
             extra_kwargs["default_headers"] = {
                 "HTTP-Referer": "https://a-stock-research-assistant.streamlit.app",
-                "X-Title": "A股智能投研助手",
+                "X-Title": "A-Stock Research Assistant",
             }
         client = OpenAI(api_key=cfg["api_key"], base_url=cfg["base_url"], **extra_kwargs)
         return client, cfg, None
