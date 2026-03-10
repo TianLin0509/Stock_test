@@ -72,6 +72,22 @@ MODEL_CONFIGS = {
         "provider":       "deepseek",
         "note":           "DeepSeek-V3 · 仅内部知识",
     },
+    "🟢 Gemini · Google": {
+        "api_key":        "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",
+        "base_url":       "https://openrouter.ai/api/v1",
+        "model":          "google/gemini-2.5-pro:online",     # :online 自动开启联网搜索
+        "supports_search": False,                              # 联网由 :online 后缀处理，无需额外参数
+        "provider":       "openrouter",
+        "note":           "Gemini 2.5 Pro · 联网搜索（OpenRouter）",
+    },
+    "🔷 GPT · OpenAI": {
+        "api_key":        "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",
+        "base_url":       "https://openrouter.ai/api/v1",
+        "model":          "openai/gpt-4.1:online",            # :online 自动开启联网搜索
+        "supports_search": False,                              # 联网由 :online 后缀处理
+        "provider":       "openrouter",
+        "note":           "GPT-4.1 · 联网搜索（OpenRouter）",
+    },
 }
 
 MODEL_NAMES = list(MODEL_CONFIGS.keys())
@@ -554,7 +570,14 @@ def get_ai_client(model_name: str) -> tuple[OpenAI | None, dict | None, str | No
     if not cfg["api_key"]:
         return None, cfg, f"「{model_name}」的 API Key 尚未配置，请在 app.py 中填写"
     try:
-        client = OpenAI(api_key=cfg["api_key"], base_url=cfg["base_url"])
+        extra_kwargs = {}
+        # OpenRouter 需要额外请求头
+        if cfg.get("provider") == "openrouter":
+            extra_kwargs["default_headers"] = {
+                "HTTP-Referer": "https://a-stock-research-assistant.streamlit.app",
+                "X-Title": "A股智能投研助手",
+            }
+        client = OpenAI(api_key=cfg["api_key"], base_url=cfg["base_url"], **extra_kwargs)
         return client, cfg, None
     except Exception as e:
         return None, cfg, str(e)
