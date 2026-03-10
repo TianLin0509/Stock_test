@@ -83,8 +83,12 @@ st.set_page_config(
     page_title="A股投研小助手 🌸",
     page_icon="📈",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="auto",   # 手机端自动收起侧边栏
 )
+
+# 注入 viewport meta，确保手机端不自动缩放
+st.markdown("""<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">""",
+            unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # CSS — 浅色可爱风
@@ -321,6 +325,219 @@ html, body, [data-testid="stAppViewContainer"] {
   font-size: 0.78rem; color: #c2410c; margin-top: 0.8rem; line-height: 1.6;
 }
 hr { border-color: var(--border) !important; margin: 1rem 0 !important; }
+
+/* ═══════════════════════════════════════════════════════════════
+   📱 MOBILE RESPONSIVE — 768px 以下生效
+   ═══════════════════════════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+
+  /* ── 全局：更紧凑的间距 ── */
+  .block-container {
+    padding: 0.5rem 0.8rem !important;
+  }
+
+  /* ── 全局文本：防止长串溢出 ── */
+  .stMarkdown, .stMarkdown p, .stMarkdown li,
+  .role-content, .analysis-wrap,
+  [data-testid="stMarkdownContainer"] {
+    overflow-wrap: break-word !important;
+    word-break: break-word !important;
+    hyphens: auto;
+  }
+
+  /* ── st.container(border=True) 内边距缩小 ── */
+  [data-testid="stVerticalBlock"] > [data-testid="stVerticalBlockBorderWrapper"] {
+    padding: 0.6rem 0.7rem !important;
+  }
+
+  /* ── Header：缩小字号和内边距 ── */
+  .app-header {
+    padding: 1rem 1.2rem;
+    border-radius: 12px;
+    margin-bottom: 0.8rem;
+  }
+  .app-header h1 {
+    font-size: 1.3rem;
+  }
+  .app-header p {
+    font-size: 0.76rem;
+  }
+  .app-header::before {
+    display: none;  /* 隐藏装饰 emoji */
+  }
+
+  /* ── 搜索栏 & 按钮：单行内输入框更大、按钮更好按 ── */
+  .stTextInput input {
+    font-size: 1rem !important;
+    padding: 0.6rem 1rem !important;
+    border-radius: 12px !important;
+  }
+  .stButton button {
+    font-size: 0.82rem !important;
+    padding: 0.55rem 0.8rem !important;
+    border-radius: 12px !important;
+    min-height: 44px !important;   /* iOS 推荐最小触控尺寸 */
+  }
+
+  /* ── 指标卡片 ── */
+  [data-testid="metric-container"] {
+    padding: 0.55rem 0.65rem !important;
+    border-radius: 8px !important;
+  }
+  [data-testid="stMetricLabel"] {
+    font-size: 0.62rem !important;
+    letter-spacing: 0 !important;
+  }
+  [data-testid="stMetricValue"] {
+    font-size: 0.92rem !important;
+  }
+
+  /* ── Tabs：可滚动，不挤压 ── */
+  .stTabs [data-baseweb="tab-list"] {
+    border-radius: 12px !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    width: 100% !important;
+    flex-wrap: nowrap !important;
+  }
+  .stTabs [data-baseweb="tab-list"]::-webkit-scrollbar {
+    display: none;
+  }
+  .stTabs [data-baseweb="tab"] {
+    font-size: 0.75rem !important;
+    padding: 5px 12px !important;
+    white-space: nowrap !important;
+    flex-shrink: 0 !important;
+  }
+
+  /* ── 角色卡片：更紧凑 ── */
+  .role-card {
+    padding: 0.9rem 1rem;
+    border-radius: 12px;
+    margin: 0.6rem 0;
+  }
+  .role-badge {
+    font-size: 0.72rem;
+    padding: 2px 10px;
+  }
+  .role-content {
+    font-size: 0.82rem;
+    line-height: 1.65;
+  }
+
+  /* ── 状态横幅 ── */
+  .status-banner {
+    font-size: 0.78rem;
+    padding: 0.6rem 0.85rem;
+    border-radius: 8px;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  /* ── Model badge ── */
+  .model-badge {
+    font-size: 0.74rem;
+    padding: 3px 10px;
+  }
+
+  /* ── 分析内容中的表格：横向可滚动 ── */
+  .stMarkdown table,
+  [data-testid="stContainer"] table,
+  [data-testid="stMarkdownContainer"] table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    white-space: nowrap;
+    font-size: 0.76rem;
+    max-width: 100%;
+  }
+  .stMarkdown table th,
+  .stMarkdown table td,
+  [data-testid="stMarkdownContainer"] th,
+  [data-testid="stMarkdownContainer"] td {
+    padding: 4px 8px !important;
+    font-size: 0.76rem !important;
+  }
+
+  /* ── 免责声明 ── */
+  .disclaimer {
+    font-size: 0.72rem;
+    padding: 0.55rem 0.8rem;
+  }
+
+  /* ── Plotly 图表：降低高度 ── */
+  [data-testid="stPlotlyChart"] > div {
+    max-height: 360px !important;
+  }
+  .js-plotly-plot .plotly .main-svg {
+    max-height: 360px !important;
+  }
+
+  /* ── 进度条文字缩短 ── */
+  [data-testid="stProgressBarLabel"] {
+    font-size: 0.76rem !important;
+  }
+
+  /* ── 分析标题缩小 ── */
+  h4 {
+    font-size: 1rem !important;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   📱 极窄屏幕（≤480px，小屏手机竖屏）
+   ═══════════════════════════════════════════════════════════════ */
+@media (max-width: 480px) {
+  .app-header h1 {
+    font-size: 1.1rem;
+  }
+  .app-header p {
+    font-size: 0.68rem;
+  }
+  .app-header {
+    padding: 0.75rem 0.9rem;
+  }
+  .block-container {
+    padding: 0.3rem 0.5rem !important;
+  }
+  .stTabs [data-baseweb="tab"] {
+    font-size: 0.68rem !important;
+    padding: 4px 8px !important;
+  }
+  [data-testid="stMetricValue"] {
+    font-size: 0.8rem !important;
+  }
+  [data-testid="stMetricLabel"] {
+    font-size: 0.56rem !important;
+  }
+  .role-card {
+    padding: 0.65rem 0.7rem;
+  }
+  .role-content {
+    font-size: 0.76rem;
+    line-height: 1.55;
+  }
+  .role-badge {
+    font-size: 0.66rem;
+  }
+  /* 表格字号进一步缩小 */
+  .stMarkdown table th,
+  .stMarkdown table td,
+  [data-testid="stMarkdownContainer"] th,
+  [data-testid="stMarkdownContainer"] td {
+    font-size: 0.7rem !important;
+    padding: 3px 6px !important;
+  }
+  /* Plotly 图表更矮 */
+  [data-testid="stPlotlyChart"] > div {
+    max-height: 300px !important;
+  }
+  h4 {
+    font-size: 0.92rem !important;
+  }
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -673,17 +890,26 @@ def render_kline(df: pd.DataFrame, name: str, ts_code: str) -> None:
     fig.update_layout(
         title=dict(text=f"<b>{name}（{to_code6(ts_code)}）</b>  日K线",
                    font=dict(family="Nunito,sans-serif", size=13, color="#6b7280")),
-        template="plotly_white", height=540,
+        template="plotly_white", height=440, autosize=True,
         xaxis_rangeslider_visible=False,
         plot_bgcolor="#fafbff", paper_bgcolor="#ffffff",
         font=dict(family="Nunito,sans-serif", color="#6b7280", size=11),
         legend=dict(orientation="h", y=1.05, x=0,
                     font=dict(size=10), bgcolor="rgba(0,0,0,0)"),
-        margin=dict(t=50, b=15, l=10, r=10),
+        margin=dict(t=45, b=10, l=5, r=5),
+        # 移动端友好：禁用 hover 跟踪线避免误触
+        hovermode="x unified",
+        dragmode=False,
     )
-    fig.update_xaxes(gridcolor="#e5e7eb", gridwidth=0.5, zeroline=False)
+    fig.update_xaxes(gridcolor="#e5e7eb", gridwidth=0.5, zeroline=False,
+                     nticks=8)  # 减少x轴刻度避免拥挤
     fig.update_yaxes(gridcolor="#e5e7eb", gridwidth=0.5)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True,
+                    config={
+                        "displayModeBar": False,
+                        "responsive": True,
+                        "scrollZoom": False,      # 禁止滚动缩放（防止手机误触）
+                    })
 
 
 def price_summary(df: pd.DataFrame) -> str:
@@ -1148,13 +1374,12 @@ def main():
 </div>""", unsafe_allow_html=True)
 
     # ── Search Bar ────────────────────────────────────────────────────────────
-    col_in, col_btn, col_clr = st.columns([5, 1.3, 0.8])
-    with col_in:
-        query = st.text_input(
-            "搜索股票", label_visibility="collapsed",
-            placeholder="🔍  输入股票代码（如 000858）或名称（如 五粮液）…",
-            key="query_input",
-        )
+    query = st.text_input(
+        "搜索股票", label_visibility="collapsed",
+        placeholder="🔍  输入股票代码（如 000858）或名称（如 五粮液）…",
+        key="query_input",
+    )
+    col_btn, col_clr, col_spacer = st.columns([1, 1, 3])
     with col_btn:
         start = st.button("🚀 开始分析", type="primary", use_container_width=True)
     with col_clr:
@@ -1234,8 +1459,13 @@ def main():
             ("换手率", info.get("换手率(%)","—")),
             ("行业", info.get("行业","—")),
         ]
-        cols = st.columns(6)
-        for col, (label, val) in zip(cols, metrics):
+        # 3列 × 2行，手机端也能正常显示
+        row1 = st.columns(3)
+        for col, (label, val) in zip(row1, metrics[:3]):
+            with col:
+                st.metric(label, str(val)[:14])
+        row2 = st.columns(3)
+        for col, (label, val) in zip(row2, metrics[3:]):
             with col:
                 st.metric(label, str(val)[:14])
 
