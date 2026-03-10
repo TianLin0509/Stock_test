@@ -72,21 +72,21 @@ MODEL_CONFIGS = {
         "provider":       "deepseek",
         "note":           "DeepSeek-V3 · 仅内部知识",
     },
-    "🟢 Gemini · Google": {
+    "🟢 Gemini 3.1 Pro · Google": {
         "api_key":        "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",
         "base_url":       "https://openrouter.ai/api/v1",
-        "model":          "google/gemini-2.5-pro:online",     # :online 自动开启联网搜索
-        "supports_search": False,                              # 联网由 :online 后缀处理，无需额外参数
-        "provider":       "openrouter",
-        "note":           "Gemini 2.5 Pro · 联网搜索（OpenRouter）",
-    },
-    "🔷 GPT · OpenAI": {
-        "api_key":        "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",
-        "base_url":       "https://openrouter.ai/api/v1",
-        "model":          "openai/gpt-4.1:online",            # :online 自动开启联网搜索
+        "model":          "google/gemini-3.1-pro:online",     # 2026.3 最新旗舰 + 联网
         "supports_search": False,                              # 联网由 :online 后缀处理
         "provider":       "openrouter",
-        "note":           "GPT-4.1 · 联网搜索（OpenRouter）",
+        "note":           "Gemini 3.1 Pro · 联网搜索（OpenRouter）",
+    },
+    "🔷 GPT-5.4 · OpenAI": {
+        "api_key":        "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",
+        "base_url":       "https://openrouter.ai/api/v1",
+        "model":          "openai/gpt-5.4:online",            # 2026.3.5 刚发布 + 联网
+        "supports_search": False,                              # 联网由 :online 后缀处理
+        "provider":       "openrouter",
+        "note":           "GPT-5.4 · 联网搜索（OpenRouter）",
     },
 }
 
