@@ -17,8 +17,8 @@ from openai import OpenAI, APIConnectionError, AuthenticationError, RateLimitErr
 # ══════════════════════════════════════════════════════════════════════════════
 import tushare as ts
 
-TUSHARE_TOKEN = "96e4ecf7246cddb2f781283bb1bbf7e45c6277a0e818a6ab1b4dcc31ea84"
-TUSHARE_URL   = "http://lianghua.nanyangqiankun.top"
+TUSHARE_TOKEN = st.secrets.get("TUSHARE_TOKEN", "")
+TUSHARE_URL   = st.secrets.get("TUSHARE_URL", "http://lianghua.nanyangqiankun.top")
 
 def init_tushare():
     try:
@@ -41,39 +41,39 @@ _pro, _ts_err = init_tushare()
 # ══════════════════════════════════════════════════════════════════════════════
 MODEL_CONFIGS = {
     "🟠 Qwen · 通义千问": {
-        "api_key":        "sk-0c6c7fdf79984ae68e83f03230a95b19",
+        "api_key":        st.secrets.get("QWEN_API_KEY", ""),
         "base_url":       "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "model":          "qwen-plus-latest",       # 最新 Qwen Plus
-        "supports_search": True,                    # 通过 enable_search 开启联网
+        "model":          "qwen-plus-latest",
+        "supports_search": True,
         "provider":       "qwen",
         "note":           "Qwen Plus · 联网搜索已开启",
     },
     "🔵 智谱 · GLM-5": {
-        "api_key":        "9d684a39c6a84e5b92fef7674c4a5495.y3hQvZKFjUnLcnsH",
+        "api_key":        st.secrets.get("ZHIPU_API_KEY", ""),
         "base_url":       "https://open.bigmodel.cn/api/paas/v4/",
-        "model":          "glm-5",                  # 2026.2 最新旗舰
+        "model":          "glm-5",
         "supports_search": True,
         "provider":       "zhipu",
         "note":           "GLM-5 旗舰 · 联网搜索",
     },
     "🟣 豆包 · Seed 2.0 Pro": {
-        "api_key":        "d951f958-77b4-455a-8120-9778d35f1484",
+        "api_key":        st.secrets.get("DOUBAO_API_KEY", ""),
         "base_url":       "https://ark.cn-beijing.volces.com/api/v3",
-        "model":          "doubao-seed-2-0-pro-260215",   # Seed 2.0 旗舰
-        "supports_search": True,                          # 通过 responses API + web_search 工具
+        "model":          "doubao-seed-2-0-pro-260215",
+        "supports_search": True,
         "provider":       "doubao",
         "note":           "Seed 2.0 Pro · 联网搜索",
     },
     "⚫ DeepSeek": {
-        "api_key":        "sk-21fa38902d2a44ba9938fc373e28424f",
+        "api_key":        st.secrets.get("DEEPSEEK_API_KEY", ""),
         "base_url":       "https://api.deepseek.com",
-        "model":          "deepseek-chat",           # V3（V4尚未开放API）
-        "supports_search": False,                    # DeepSeek官方API暂不支持联网
+        "model":          "deepseek-chat",
+        "supports_search": False,
         "provider":       "deepseek",
         "note":           "DeepSeek-V3 · 仅内部知识",
     },
     "🟢 Gemini 2.5 Pro · Google": {
-        "api_key":        "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",
+        "api_key":        st.secrets.get("OPENROUTER_API_KEY", ""),
         "base_url":       "https://openrouter.ai/api/v1",
         "model":          "google/gemini-2.5-pro",
         "supports_search": True,
@@ -81,7 +81,7 @@ MODEL_CONFIGS = {
         "note":           "Gemini 2.5 Pro · 联网搜索（OpenRouter）",
     },
     "🔷 GPT-4o · OpenAI": {
-        "api_key":        "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",
+        "api_key":        st.secrets.get("OPENROUTER_API_KEY", ""),
         "base_url":       "https://openrouter.ai/api/v1",
         "model":          "openai/gpt-4o",
         "supports_search": True,
