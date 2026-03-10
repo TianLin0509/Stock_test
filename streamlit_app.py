@@ -676,11 +676,11 @@ def _doubao_responses(cfg, messages, max_tokens, stream=False) -> tuple[str, str
     url, headers, body = _doubao_build_request(cfg, messages, max_tokens, stream=False)
     try:
         resp = requests.post(url, headers=headers, json=body, timeout=180)
+        resp.encoding = "utf-8"
         if resp.status_code != 200:
             err_info = resp.text[:200]
             return "", f"豆包 API 错误 {resp.status_code}：{err_info}"
         data = resp.json()
-        # 从 output 中提取文本
         text = _doubao_extract_text(data)
         return text or "（豆包未返回内容）", None
     except requests.exceptions.Timeout:
@@ -716,30 +716,41 @@ def _doubao_responses_stream(cfg, messages, max_tokens):
     try:
         resp = requests.post(url, headers=headers, json=body, timeout=180, stream=True)
         if resp.status_code != 200:
+            resp.encoding = "utf-8"
             yield f"\n\n⚠️ 豆包 API 错误 {resp.status_code}：{resp.text[:150]}"
             return
+
+        # 强制 UTF-8 解码
+        resp.encoding = "utf-8"
 
         for line in resp.iter_lines(decode_unicode=True):
             if not line:
                 continue
-            # SSE 格式：data: {...}
-            if line.startswith("data:"):
-                raw = line[5:].strip()
-                if raw == "[DONE]":
-                    break
-                try:
-                    evt = json.loads(raw)
-                    evt_type = evt.get("type", "")
-                    # 文本增量
-                    if evt_type == "response.output_text.delta":
-                        delta = evt.get("delta", "")
-                        if delta:
-                            yield delta
-                    # 也兼容其他可能格式
-                    elif "delta" in evt and isinstance(evt["delta"], str):
-                        yield evt["delta"]
-                except json.JSONDecodeError:
-                    continue
+            # SSE 格式：data: {...}  或  event: xxx
+            if not line.startswith("data:"):
+                continue
+            raw = line[5:].strip()
+            if raw == "[DONE]":
+                break
+            try:
+                evt = json.loads(raw)
+                evt_type = evt.get("type", "")
+                # ⚠️ 只接受 output_text 的增量，严格过滤掉 reasoning/thinking
+                if evt_type == "response.output_text.delta":
+                    delta = evt.get("delta", "")
+                    if delta:
+                        yield delta
+                # 兼容：有些版本直接返回 content_part 类型
+                elif evt_type == "response.content_part.delta":
+                    delta = evt.get("delta", {})
+                    if isinstance(delta, dict):
+                        text = delta.get("text", "")
+                        if text:
+                            yield text
+                    elif isinstance(delta, str) and delta:
+                        yield delta
+            except json.JSONDecodeError:
+                continue
 
     except requests.exceptions.Timeout:
         yield "\n\n⚠️ 豆包 API 请求超时，请稍后重试"
