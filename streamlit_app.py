@@ -48,29 +48,29 @@ MODEL_CONFIGS = {
         "provider":       "qwen",
         "note":           "Qwen Plus · 联网搜索已开启",
     },
-    "🔵 智谱 · GLM": {
-        "api_key":        "",                        # 待补充
+    "🔵 智谱 · GLM-5": {
+        "api_key":        "9d684a39c6a84e5b92fef7674c4a5495.y3hQvZKFjUnLcnsH",
         "base_url":       "https://open.bigmodel.cn/api/paas/v4/",
-        "model":          "glm-4-plus",
+        "model":          "glm-5",                  # 2026.2 最新旗舰
         "supports_search": True,
         "provider":       "zhipu",
-        "note":           "GLM-4-Plus · 联网搜索",
+        "note":           "GLM-5 旗舰 · 联网搜索",
     },
-    "🟣 豆包 · 字节跳动": {
-        "api_key":        "",                        # 待补充
+    "🟣 豆包 · Seed 2.0 Pro": {
+        "api_key":        "d951f958-77b4-455a-8120-9778d35f1484",
         "base_url":       "https://ark.cn-beijing.volces.com/api/v3",
-        "model":          "doubao-pro-32k",
-        "supports_search": False,
+        "model":          "doubao-seed-2-0-pro-260215",   # Seed 2.0 旗舰
+        "supports_search": True,
         "provider":       "doubao",
-        "note":           "Doubao Pro 32K",
+        "note":           "Seed 2.0 Pro · 联网搜索",
     },
     "⚫ DeepSeek": {
-        "api_key":        "",                        # 待补充
+        "api_key":        "sk-21fa38902d2a44ba9938fc373e28424f",
         "base_url":       "https://api.deepseek.com",
-        "model":          "deepseek-chat",
-        "supports_search": False,
+        "model":          "deepseek-chat",           # V3（V4尚未开放API）
+        "supports_search": False,                    # DeepSeek官方API暂不支持联网
         "provider":       "deepseek",
-        "note":           "DeepSeek-V3",
+        "note":           "DeepSeek-V3 · 仅内部知识",
     },
 }
 
@@ -574,7 +574,7 @@ def call_ai(client: OpenAI, cfg: dict, prompt: str,
     extra: dict = {}
     if cfg.get("supports_search") and cfg.get("provider") == "qwen":
         extra["extra_body"] = {"enable_search": True}
-    elif cfg.get("supports_search") and cfg.get("provider") == "zhipu":
+    elif cfg.get("supports_search") and cfg.get("provider") in ("zhipu", "doubao"):
         extra["tools"] = [{"type": "web_search", "web_search": {"enable": True}}]
 
     try:
@@ -619,7 +619,7 @@ def call_ai_stream(client: OpenAI, cfg: dict, prompt: str,
     extra: dict = {}
     if cfg.get("supports_search") and cfg.get("provider") == "qwen":
         extra["extra_body"] = {"enable_search": True}
-    elif cfg.get("supports_search") and cfg.get("provider") == "zhipu":
+    elif cfg.get("supports_search") and cfg.get("provider") in ("zhipu", "doubao"):
         extra["tools"] = [{"type": "web_search", "web_search": {"enable": True}}]
 
     try:
