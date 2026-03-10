@@ -9,7 +9,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime, timedelta
-import json, re
+import json, re, requests
 from openai import OpenAI, APIConnectionError, AuthenticationError, RateLimitError
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -60,7 +60,7 @@ MODEL_CONFIGS = {
         "api_key":        "d951f958-77b4-455a-8120-9778d35f1484",
         "base_url":       "https://ark.cn-beijing.volces.com/api/v3",
         "model":          "doubao-seed-2-0-pro-260215",   # Seed 2.0 旗舰
-        "supports_search": True,
+        "supports_search": True,                          # 通过 responses API + web_search 工具
         "provider":       "doubao",
         "note":           "Seed 2.0 Pro · 联网搜索",
     },
@@ -564,17 +564,21 @@ def call_ai(client: OpenAI, cfg: dict, prompt: str,
             system: str = "", max_tokens: int = 3200) -> tuple[str, str | None]:
     """
     调用 AI 模型。返回 (text, error_msg)。
-    Qwen 等支持联网的模型会自动开启 enable_search。
+    豆包走 responses API 联网搜索，其他走 chat.completions。
     """
     messages = []
     if system:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
 
+    # ── 豆包：走 responses API 实现联网搜索 ──
+    if cfg.get("provider") == "doubao" and cfg.get("supports_search"):
+        return _doubao_responses(cfg, messages, max_tokens, stream=False)
+
     extra: dict = {}
     if cfg.get("supports_search") and cfg.get("provider") == "qwen":
         extra["extra_body"] = {"enable_search": True}
-    elif cfg.get("supports_search") and cfg.get("provider") in ("zhipu", "doubao"):
+    elif cfg.get("supports_search") and cfg.get("provider") == "zhipu":
         extra["tools"] = [{"type": "web_search", "web_search": {"enable": True}}]
 
     try:
@@ -595,7 +599,6 @@ def call_ai(client: OpenAI, cfg: dict, prompt: str,
         return "", f"网络连接失败：{e}"
     except Exception as e:
         err = str(e)
-        # 常见错误友化
         if "invalid_api_key" in err.lower() or "401" in err:
             return "", "API Key 无效，请切换其他模型或检查密钥"
         if "quota" in err.lower() or "insufficient" in err.lower():
@@ -609,17 +612,22 @@ def call_ai_stream(client: OpenAI, cfg: dict, prompt: str,
                    system: str = "", max_tokens: int = 3200):
     """
     流式调用 AI 模型，yield 文本片段。
-    配合 st.write_stream() 实现打字机效果。
+    豆包走 responses API 流式联网搜索。
     """
     messages = []
     if system:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
 
+    # ── 豆包：走 responses API 流式联网搜索 ──
+    if cfg.get("provider") == "doubao" and cfg.get("supports_search"):
+        yield from _doubao_responses_stream(cfg, messages, max_tokens)
+        return
+
     extra: dict = {}
     if cfg.get("supports_search") and cfg.get("provider") == "qwen":
         extra["extra_body"] = {"enable_search": True}
-    elif cfg.get("supports_search") and cfg.get("provider") in ("zhipu", "doubao"):
+    elif cfg.get("supports_search") and cfg.get("provider") == "zhipu":
         extra["tools"] = [{"type": "web_search", "web_search": {"enable": True}}]
 
     try:
@@ -642,6 +650,101 @@ def call_ai_stream(client: OpenAI, cfg: dict, prompt: str,
         yield f"\n\n⚠️ 网络连接失败：{e}"
     except Exception as e:
         yield f"\n\n⚠️ AI 调用异常：{str(e)[:120]}"
+
+
+# ── 豆包 Responses API（联网搜索） ─────────────────────────────────────────
+
+def _doubao_build_request(cfg, messages, max_tokens, stream=False):
+    """构建豆包 responses API 请求参数"""
+    url = cfg["base_url"].rstrip("/") + "/responses"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {cfg['api_key']}",
+    }
+    body = {
+        "model": cfg["model"],
+        "input": messages,
+        "tools": [{"type": "web_search", "max_keyword": 3}],
+        "stream": stream,
+        "max_output_tokens": max_tokens,
+    }
+    return url, headers, body
+
+
+def _doubao_responses(cfg, messages, max_tokens, stream=False) -> tuple[str, str | None]:
+    """豆包非流式 responses API 调用"""
+    url, headers, body = _doubao_build_request(cfg, messages, max_tokens, stream=False)
+    try:
+        resp = requests.post(url, headers=headers, json=body, timeout=180)
+        if resp.status_code != 200:
+            err_info = resp.text[:200]
+            return "", f"豆包 API 错误 {resp.status_code}：{err_info}"
+        data = resp.json()
+        # 从 output 中提取文本
+        text = _doubao_extract_text(data)
+        return text or "（豆包未返回内容）", None
+    except requests.exceptions.Timeout:
+        return "", "豆包 API 请求超时，请稍后重试"
+    except Exception as e:
+        return "", f"豆包调用异常：{str(e)[:120]}"
+
+
+def _doubao_extract_text(data: dict) -> str:
+    """从豆包 responses API 返回值中提取纯文本"""
+    # responses API 返回格式：
+    # {"output": [{"type":"message","content":[{"type":"output_text","text":"..."}]}]}
+    parts = []
+    for item in data.get("output", []):
+        if item.get("type") == "message":
+            for c in item.get("content", []):
+                if c.get("type") == "output_text":
+                    parts.append(c.get("text", ""))
+        # 也可能直接有 text 字段
+        if "text" in item:
+            parts.append(item["text"])
+    if parts:
+        return "\n".join(parts)
+    # fallback：尝试顶层 output_text
+    if "output_text" in data:
+        return data["output_text"]
+    return ""
+
+
+def _doubao_responses_stream(cfg, messages, max_tokens):
+    """豆包流式 responses API 调用，yield 文本片段"""
+    url, headers, body = _doubao_build_request(cfg, messages, max_tokens, stream=True)
+    try:
+        resp = requests.post(url, headers=headers, json=body, timeout=180, stream=True)
+        if resp.status_code != 200:
+            yield f"\n\n⚠️ 豆包 API 错误 {resp.status_code}：{resp.text[:150]}"
+            return
+
+        for line in resp.iter_lines(decode_unicode=True):
+            if not line:
+                continue
+            # SSE 格式：data: {...}
+            if line.startswith("data:"):
+                raw = line[5:].strip()
+                if raw == "[DONE]":
+                    break
+                try:
+                    evt = json.loads(raw)
+                    evt_type = evt.get("type", "")
+                    # 文本增量
+                    if evt_type == "response.output_text.delta":
+                        delta = evt.get("delta", "")
+                        if delta:
+                            yield delta
+                    # 也兼容其他可能格式
+                    elif "delta" in evt and isinstance(evt["delta"], str):
+                        yield evt["delta"]
+                except json.JSONDecodeError:
+                    continue
+
+    except requests.exceptions.Timeout:
+        yield "\n\n⚠️ 豆包 API 请求超时，请稍后重试"
+    except Exception as e:
+        yield f"\n\n⚠️ 豆包调用异常：{str(e)[:120]}"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
