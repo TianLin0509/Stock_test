@@ -75,16 +75,16 @@ MODEL_CONFIGS = {
     "🟢 Gemini 3.1 Pro · Google": {
         "api_key":        "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",
         "base_url":       "https://openrouter.ai/api/v1",
-        "model":          "google/gemini-3.1-pro-preview:online",
-        "supports_search": False,
+        "model":          "google/gemini-3.1-pro-preview",
+        "supports_search": True,
         "provider":       "openrouter",
         "note":           "Gemini 3.1 Pro · 联网搜索（OpenRouter）",
     },
     "🔷 GPT-5.2 · OpenAI": {
         "api_key":        "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",
         "base_url":       "https://openrouter.ai/api/v1",
-        "model":          "openai/gpt-5.2:online",
-        "supports_search": False,
+        "model":          "openai/gpt-5.2",
+        "supports_search": True,
         "provider":       "openrouter",
         "note":           "GPT-5.2 · 联网搜索（OpenRouter）",
     },
@@ -603,6 +603,8 @@ def call_ai(client: OpenAI, cfg: dict, prompt: str,
         extra["extra_body"] = {"enable_search": True}
     elif cfg.get("supports_search") and cfg.get("provider") == "zhipu":
         extra["tools"] = [{"type": "web_search", "web_search": {"enable": True}}]
+    elif cfg.get("supports_search") and cfg.get("provider") == "openrouter":
+        extra["extra_body"] = {"plugins": [{"id": "web", "max_results": 5}]}
 
     try:
         resp = client.chat.completions.create(
@@ -614,8 +616,8 @@ def call_ai(client: OpenAI, cfg: dict, prompt: str,
         text = resp.choices[0].message.content or ""
         return text, None
 
-    except AuthenticationError:
-        return "", "API Key 认证失败，请检查密钥是否正确或已过期"
+    except AuthenticationError as e:
+        return "", f"API Key 认证失败：{str(e)[:200]}"
     except RateLimitError:
         return "", "调用频率或额度超限，请稍后重试或切换其他模型"
     except APIConnectionError as e:
@@ -623,7 +625,7 @@ def call_ai(client: OpenAI, cfg: dict, prompt: str,
     except Exception as e:
         err = str(e)
         if "invalid_api_key" in err.lower() or "401" in err:
-            return "", "API Key 无效，请切换其他模型或检查密钥"
+            return "", f"API Key 无效或模型不可用：{err[:200]}"
         if "quota" in err.lower() or "insufficient" in err.lower():
             return "", "账户余额不足，请充值或切换模型"
         if "model_not_found" in err.lower() or "does not exist" in err.lower():
@@ -652,6 +654,8 @@ def call_ai_stream(client: OpenAI, cfg: dict, prompt: str,
         extra["extra_body"] = {"enable_search": True}
     elif cfg.get("supports_search") and cfg.get("provider") == "zhipu":
         extra["tools"] = [{"type": "web_search", "web_search": {"enable": True}}]
+    elif cfg.get("supports_search") and cfg.get("provider") == "openrouter":
+        extra["extra_body"] = {"plugins": [{"id": "web", "max_results": 5}]}
 
     try:
         stream = client.chat.completions.create(
@@ -665,8 +669,8 @@ def call_ai_stream(client: OpenAI, cfg: dict, prompt: str,
             if chunk.choices and chunk.choices[0].delta.content:
                 yield chunk.choices[0].delta.content
 
-    except AuthenticationError:
-        yield "\n\n⚠️ API Key 认证失败，请检查密钥是否正确或已过期"
+    except AuthenticationError as e:
+        yield f"\n\n⚠️ API Key 认证失败：{str(e)[:200]}"
     except RateLimitError:
         yield "\n\n⚠️ 调用频率或额度超限，请稍后重试或切换其他模型"
     except APIConnectionError as e:
