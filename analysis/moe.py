@@ -1,7 +1,8 @@
-"""MoE 多角色辩论裁决"""
+"""MoE 多角色辩论裁决 v2 — 智能摘要，不丢失关键结论"""
 
 import streamlit as st
 from ai.client import call_ai
+from ai.context import build_analysis_context
 from data.tushare_client import to_code6
 
 MOE_ROLES = [
@@ -20,16 +21,19 @@ MOE_ROLES = [
                "追涨杀跌，高点乐观底部恐慌。口语化，带散户焦虑/贪婪/侥幸心理。"},
 ]
 
-CEO_SYSTEM = ("你是掌管300亿私募的顶级CEO，历经2008/2015/2018三次A股大崩盘，20年投资经验。"
-              "深知散户情绪是最可靠的反向指标。给出明确、可操作、附具体价格的最终裁决。")
+CEO_SYSTEM = (
+    "你是掌管300亿私募的顶级CEO，历经2008/2015/2018三次A股大崩盘，20年投资经验。"
+    "深知散户情绪是最可靠的反向指标。"
+    "综合四位专家观点，给出明确、可操作、附具体价格的最终裁决。"
+    "重点参考机构和量化的理性分析，逆向参考散户的情绪化判断。"
+)
 
 
 def run_moe(client, cfg, name, ts_code, analyses: dict) -> None:
     code6 = to_code6(ts_code)
-    summary = f"""分析摘要：{name}（{code6}）
-【预期差】{analyses.get('expectation','')[:900]}
-【趋势】{analyses.get('trend','')[:900]}
-【基本面】{analyses.get('fundamentals','')[:900]}"""
+
+    # ── 智能摘要（替代硬切片）──────────────────────────────────────────
+    context = build_analysis_context(analyses, max_per_module=15)
 
     role_results: dict[str, str] = {}
     ai_errors = []
@@ -37,19 +41,24 @@ def run_moe(client, cfg, name, ts_code, analyses: dict) -> None:
     for role in MOE_ROLES:
         with st.spinner(f"{role['badge']} 发表观点中..."):
             prompt = f"""辩论标的：{name}（{code6}）
-背景：{summary[:2200]}
+
+## 分析背景
+{context}
+
 ---
-从你的角色视角给出明确判断，控制在220字以内：
+从你的角色视角给出明确判断，控制在250字以内：
+
 **核心判断：** 看多/看空/中性/观望
-**主要依据（3条）：**
+**判断依据（3条，引用上方分析中的具体数据）：**
 1.
 2.
 3.
-**操作建议：**（具体操作+参考点位）
-**最大风险：**（1个）
+**操作建议：**（具体操作+入场价+止损价+目标价）
+**最大风险：**（1条，具体描述）
+
 保持角色特色和语言风格。"""
             text, err = call_ai(client, cfg, prompt,
-                                system=role["system"], max_tokens=700)
+                                system=role["system"], max_tokens=800)
         if err:
             text = f"⚠️ 该角色分析失败：{err}"
             ai_errors.append(err)
@@ -60,36 +69,60 @@ def run_moe(client, cfg, name, ts_code, analyses: dict) -> None:
 </div>""", unsafe_allow_html=True)
 
     if ai_errors:
-        st.markdown(f'<div class="status-banner warn">⚠️ 部分角色调用失败，建议切换模型重试：{ai_errors[0]}</div>',
-                    unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="status-banner warn">⚠️ 部分角色调用失败，建议切换模型重试：{ai_errors[0]}</div>',
+            unsafe_allow_html=True,
+        )
 
     st.markdown("---")
 
-    roles_text = "\n\n".join(f"【{r['badge']}】\n{role_results.get(r['key'],'')}"
-                              for r in MOE_ROLES)
+    # ── CEO 裁决 ──────────────────────────────────────────────────────
+    roles_text = "\n\n".join(
+        f"【{r['badge']}】\n{role_results.get(r['key'], '')}"
+        for r in MOE_ROLES
+    )
+
     with st.spinner("👔 首席执行官 综合裁决中..."):
         ceo_prompt = f"""标的：{name}（{code6}）
-四位专家观点：{roles_text}
-背景：{summary[:1200]}
+
+## 四位专家观点
+{roles_text}
+
+## 原始分析摘要
+{context}
+
 ---
-给出最终操作裁决。**散户（韭菜代表）的观点是反向指标，逆向参考。**
+综合以上信息给出最终操作裁决。
+⚠️ **散户（韭菜代表）的观点是反向指标，逆向参考。**
 
 ## 🎯 最终操作结论
+
 **操作评级：** 强烈买入/买入/谨慎介入/持有观察/减持/回避
-**裁决逻辑（3-4句）：**
+
+**裁决逻辑（3-4句，说明为什么这样判断）：**
+
 **目标价体系：**
 | 维度 | 价格 | 依据 |
 |-----|-----|-----|
-| 当前股价 | X.XX元 | — |
+| 当前股价 | ___元 | — |
 | 短线目标（1-2周）| | |
 | 中线目标（1-3月）| | |
 | 止损位 | | |
-**仓位策略：** 建议仓位X%，介入方式：
-**核心逻辑（2条）：**
-**核心风险（2条）：**
-**策略有效期：** ___个交易日，若[条件]则失效。"""
 
-        ceo_text, ceo_err = call_ai(client, cfg, ceo_prompt, system=CEO_SYSTEM, max_tokens=1600)
+**仓位策略：** 建议仓位___%, 介入方式：___
+
+**核心逻辑（2条）：**
+1.
+2.
+
+**核心风险（2条）：**
+1.
+2.
+
+**策略有效期：** ___个交易日，若___则策略失效。"""
+
+        ceo_text, ceo_err = call_ai(client, cfg, ceo_prompt,
+                                     system=CEO_SYSTEM, max_tokens=2000)
 
     if ceo_err:
         ceo_text = f"⚠️ CEO裁决生成失败：{ceo_err}\n\n建议切换其他模型后重新尝试。"
