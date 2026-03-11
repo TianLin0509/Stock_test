@@ -1,161 +1,316 @@
-"""K线图渲染"""
+"""
+📐 历史相似走势匹配算法 v2
+五维 K 线特征：涨跌幅形态 + 成交量节奏 + 振幅 + 上影线 + 下影线
+"""
 
-import streamlit as st
+import numpy as np
 import pandas as pd
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-from data.tushare_client import to_code6
+import os
+import streamlit as st
+
+HISTORY_FILE = os.path.join(os.path.dirname(__file__), "history", "all_daily.parquet")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 五维权重配置
+# ══════════════════════════════════════════════════════════════════════════════
+#   涨跌幅形态：整体走势方向和节奏（最重要）
+#   振幅：K线实体大小，区分大阳线/十字星/小阴线
+#   成交量节奏：放量/缩量的节奏
+#   上影线比例：上方抛压信号（长上影 = 卖压重）
+#   下影线比例：下方支撑信号（长下影 = 有承接）
+
+WEIGHTS = {
+    "pct_chg":      0.35,   # 涨跌幅形态
+    "amplitude":    0.25,   # 振幅（实体大小）
+    "vol_chg":      0.20,   # 成交量变化率
+    "upper_shadow": 0.10,   # 上影线比例
+    "lower_shadow": 0.10,   # 下影线比例
+}
 
 
-def render_kline(df: pd.DataFrame, name: str, ts_code: str) -> None:
-    if df.empty:
-        st.warning("⚠️ 暂无K线数据，请检查股票代码或 Tushare 连接状态")
-        return
-    d = df.copy()
-    for p in [5, 20, 60]:
-        d[f"MA{p}"] = d["收盘"].rolling(p).mean()
-
-    fig = make_subplots(rows=2, cols=1, shared_xaxes=True,
-                        vertical_spacing=0.02, row_heights=[0.72, 0.28])
-
-    fig.add_trace(go.Candlestick(
-        x=d["日期"], open=d["开盘"], high=d["最高"],
-        low=d["最低"], close=d["收盘"], name="K线",
-        increasing=dict(line=dict(color="#22c55e", width=1.2), fillcolor="#22c55e"),
-        decreasing=dict(line=dict(color="#ef4444", width=1.2), fillcolor="#ef4444"),
-        whiskerwidth=0.5,
-    ), row=1, col=1)
-
-    for ma, clr in [("MA5", "#f97316"), ("MA20", "#6366f1"), ("MA60", "#a855f7")]:
-        fig.add_trace(go.Scatter(x=d["日期"], y=d[ma], name=ma,
-                                  line=dict(color=clr, width=1.6), mode="lines"),
-                      row=1, col=1)
-
-    colors = ["#22c55e" if c >= o else "#ef4444"
-              for c, o in zip(d["收盘"], d["开盘"])]
-    fig.add_trace(go.Bar(x=d["日期"], y=d["成交量"], name="成交量",
-                          marker_color=colors, opacity=0.55), row=2, col=1)
-    fig.add_trace(go.Scatter(x=d["日期"], y=d["成交量"].rolling(5).mean(), name="量MA5",
-                              line=dict(color="#f97316", width=1.5), mode="lines",
-                              opacity=0.85), row=2, col=1)
-
-    fig.update_layout(
-        title=dict(text=f"<b>{name}（{to_code6(ts_code)}）</b>  日K线",
-                   font=dict(family="Nunito,sans-serif", size=13, color="#6b7280")),
-        template="plotly_white", height=440, autosize=True,
-        xaxis_rangeslider_visible=False,
-        plot_bgcolor="#fafbff", paper_bgcolor="#ffffff",
-        font=dict(family="Nunito,sans-serif", color="#6b7280", size=11),
-        legend=dict(orientation="h", y=1.05, x=0,
-                    font=dict(size=10), bgcolor="rgba(0,0,0,0)"),
-        margin=dict(t=45, b=10, l=5, r=5),
-        hovermode="x unified",
-        dragmode=False,
-    )
-    fig.update_xaxes(gridcolor="#e5e7eb", gridwidth=0.5, zeroline=False, nticks=8)
-    fig.update_yaxes(gridcolor="#e5e7eb", gridwidth=0.5)
-    st.plotly_chart(fig, use_container_width=True,
-                    config={
-                        "displayModeBar": False,
-                        "responsive": True,
-                        "scrollZoom": False,
-                    })
+@st.cache_data(ttl=86400, show_spinner=False)
+def load_history() -> pd.DataFrame:
+    """加载全市场历史日线数据"""
+    if not os.path.exists(HISTORY_FILE):
+        return pd.DataFrame()
+    df = pd.read_parquet(HISTORY_FILE)
+    df = df.sort_values(["ts_code", "trade_date"]).reset_index(drop=True)
+    return df
 
 
-def render_similar_case(case: dict, idx: int) -> None:
+# ══════════════════════════════════════════════════════════════════════════════
+# 特征提取
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _calc_amplitude(open_arr, high_arr, low_arr):
+    """振幅 = (最高 - 最低) / 开盘，衡量K线实体大小"""
+    return (high_arr - low_arr) / (open_arr + 1e-10)
+
+
+def _calc_upper_shadow(open_arr, high_arr, close_arr, low_arr):
+    """上影线比例 = (最高 - max(开,收)) / (最高 - 最低)"""
+    body_top = np.maximum(open_arr, close_arr)
+    hl_range = high_arr - low_arr + 1e-10
+    return (high_arr - body_top) / hl_range
+
+
+def _calc_lower_shadow(open_arr, high_arr, close_arr, low_arr):
+    """下影线比例 = (min(开,收) - 最低) / (最高 - 最低)"""
+    body_bottom = np.minimum(open_arr, close_arr)
+    hl_range = high_arr - low_arr + 1e-10
+    return (body_bottom - low_arr) / hl_range
+
+
+def _calc_vol_change(vol_arr):
+    """成交量变化率 = vol[i]/vol[i-1] - 1，第一天填0"""
+    vol_chg = np.zeros(len(vol_arr))
+    vol_chg[1:] = np.diff(vol_arr) / (vol_arr[:-1] + 1e-10)
+    return np.clip(vol_chg, -5, 5)
+
+
+def extract_features_from_target(df: pd.DataFrame, k_days: int) -> dict[str, np.ndarray] | None:
     """
-    渲染单个相似走势案例的 K 线图
-    case 字段：ts_code, name, similarity, match_start_date, match_end_date,
-              subsequent_return, context_df
-    context_df 字段：trade_date, open, high, low, close, vol, is_match
+    从目标股票 DataFrame 提取五维特征（中文列名）
+    返回 {"pct_chg": array, "amplitude": array, ...} 或 None
     """
-    ctx = case["context_df"].copy()
-    if ctx.empty:
-        return
+    if len(df) < k_days:
+        return None
 
-    code = case["ts_code"]
-    sim  = case["similarity"]
-    start_d = case["match_start_date"]
-    end_d   = case["match_end_date"]
-    ret     = case["subsequent_return"]
+    recent = df.tail(k_days)
+    o = recent["开盘"].values.astype(np.float64)
+    h = recent["最高"].values.astype(np.float64)
+    l = recent["最低"].values.astype(np.float64)
+    c = recent["收盘"].values.astype(np.float64)
+    v = recent["成交量"].values.astype(np.float64)
 
-    ret_text = f"后续走势 **{ret:+.1f}%**" if ret is not None else "后续数据不足"
-    if ret is not None:
-        ret_color = "🟢" if ret > 0 else "🔴" if ret < 0 else "⚪"
+    return {
+        "pct_chg":      recent["涨跌幅"].values.astype(np.float64),
+        "amplitude":    _calc_amplitude(o, h, l),
+        "vol_chg":      _calc_vol_change(v),
+        "upper_shadow": _calc_upper_shadow(o, h, c, l),
+        "lower_shadow": _calc_lower_shadow(o, h, c, l),
+    }
+
+
+def extract_all_features_for_stock(grp: pd.DataFrame) -> dict[str, np.ndarray]:
+    """
+    从单只股票完整日线提取五维特征序列（英文列名，历史数据）
+    返回 {"pct_chg": array(N,), "amplitude": array(N,), ...}
+    """
+    o = grp["open"].values.astype(np.float64)
+    h = grp["high"].values.astype(np.float64)
+    l = grp["low"].values.astype(np.float64)
+    c = grp["close"].values.astype(np.float64)
+    v = grp["vol"].values.astype(np.float64)
+
+    return {
+        "pct_chg":      grp["pct_chg"].values.astype(np.float64),
+        "amplitude":    _calc_amplitude(o, h, l),
+        "vol_chg":      _calc_vol_change(v),
+        "upper_shadow": _calc_upper_shadow(o, h, c, l),
+        "lower_shadow": _calc_lower_shadow(o, h, c, l),
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 相似度计算
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _pearson_batch(target: np.ndarray, windows: np.ndarray) -> np.ndarray:
+    """
+    批量皮尔逊相关：target(K,) vs windows(N, K) → corrs(N,)
+    """
+    K = len(target)
+    if K < 3:
+        return np.zeros(len(windows))
+
+    t_mean = target.mean()
+    t_std  = target.std()
+    if t_std < 1e-10:
+        return np.zeros(len(windows))
+
+    w_mean = windows.mean(axis=1, keepdims=True)
+    w_std  = windows.std(axis=1)
+
+    valid = w_std > 1e-10
+    corrs = np.zeros(len(windows))
+
+    if valid.any():
+        t_norm = target - t_mean
+        w_norm = windows[valid] - w_mean[valid]
+        cov = (w_norm * t_norm).sum(axis=1) / K
+        corrs[valid] = cov / (t_std * w_std[valid])
+
+    return corrs
+
+
+def _weighted_similarity(target_feats: dict, stock_feats: dict, k_days: int) -> np.ndarray:
+    """
+    计算五维加权相似度
+    target_feats: {"pct_chg": (K,), ...}
+    stock_feats:  {"pct_chg": (N,), ...}
+    返回: (n_windows,) 相似度数组
+    """
+    n = len(stock_feats["pct_chg"])
+    n_windows = n - k_days + 1
+    if n_windows <= 0:
+        return np.array([])
+
+    total_sim = np.zeros(n_windows)
+
+    for feat_name, weight in WEIGHTS.items():
+        target_seq = target_feats[feat_name]
+        full_seq   = stock_feats[feat_name]
+        # 滑窗
+        windows = np.lib.stride_tricks.sliding_window_view(full_seq, k_days)
+        corr = _pearson_batch(target_seq, windows)
+        total_sim += weight * corr
+
+    return total_sim
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 主搜索函数
+# ══════════════════════════════════════════════════════════════════════════════
+
+def find_similar(
+    target_df: pd.DataFrame,
+    k_days: int = 5,
+    top_n: int = 3,
+    context_days: int = 10,
+    exclude_code: str = "",
+    exclude_recent_days: int = 60,
+) -> list[dict]:
+    """
+    全市场搜索与 target_df 最近 k_days 走势最相似的 Top N 案例
+
+    五维特征匹配：涨跌幅 + 振幅 + 成交量节奏 + 上影线 + 下影线
+
+    参数:
+        target_df:   目标股票日线 DataFrame（中文列名：开盘/最高/最低/收盘/成交量/涨跌幅）
+        k_days:      匹配窗口天数
+        top_n:       返回前 N 个匹配
+        context_days: 匹配段前后各展示多少天
+        exclude_code: 排除的股票代码（避免自匹配）
+        exclude_recent_days: 排除最近 N 天的数据
+
+    返回:
+        [{"ts_code", "similarity", "match_start_date", "match_end_date",
+          "subsequent_return", "context_df", "feature_detail"}, ...]
+    """
+    history = load_history()
+    if history.empty:
+        return []
+
+    # ── 提取目标五维特征 ──────────────────────────────────────────────────
+    target_feats = extract_features_from_target(target_df, k_days)
+    if target_feats is None:
+        return []
+
+    # ── 排除日期阈值 ──────────────────────────────────────────────────────
+    if exclude_recent_days > 0:
+        cutoff_date = pd.to_datetime(target_df["日期"].max()) - pd.Timedelta(days=exclude_recent_days)
+        cutoff_str = cutoff_date.strftime("%Y%m%d")
     else:
-        ret_color = "⚪"
+        cutoff_str = "99999999"
 
-    st.markdown(f"""
-**案例 {idx}：{code}** &nbsp; 匹配区间 `{start_d}` ~ `{end_d}` &nbsp;
-匹配度 **{sim}%** &nbsp; {ret_color} {ret_text}
-""")
+    all_candidates = []
 
-    # 五维分项得分
-    detail = case.get("feature_detail", {})
-    if detail:
-        labels = {
-            "pct_chg": "涨跌形态",
-            "amplitude": "K线振幅",
-            "vol_chg": "量能节奏",
-            "upper_shadow": "上影线",
-            "lower_shadow": "下影线",
-        }
-        parts = [f"{labels.get(k,k)} {v}%" for k, v in detail.items()]
-        st.caption(" · ".join(parts))
+    # ── 按股票分组搜索 ────────────────────────────────────────────────────
+    for code, group in history.groupby("ts_code"):
+        if code == exclude_code:
+            continue
 
-    # K线图 + 成交量，匹配段高亮
-    fig = make_subplots(rows=2, cols=1, shared_xaxes=True,
-                        vertical_spacing=0.02, row_heights=[0.72, 0.28])
+        grp = group.sort_values("trade_date").reset_index(drop=True)
 
-    # 匹配段与上下文分开着色
-    match_mask = ctx["is_match"].values
-    dates  = ctx["trade_date"].values
+        if len(grp) < k_days + context_days:
+            continue
 
-    # K 线
-    fig.add_trace(go.Candlestick(
-        x=dates, open=ctx["open"], high=ctx["high"],
-        low=ctx["low"], close=ctx["close"], name="K线",
-        increasing=dict(line=dict(color="#22c55e", width=1.2), fillcolor="#22c55e"),
-        decreasing=dict(line=dict(color="#ef4444", width=1.2), fillcolor="#ef4444"),
-        whiskerwidth=0.5,
-    ), row=1, col=1)
+        dates = grp["trade_date"].values
 
-    # 匹配段背景高亮
-    match_dates = dates[match_mask]
-    if len(match_dates) >= 2:
-        fig.add_vrect(
-            x0=match_dates[0], x1=match_dates[-1],
-            fillcolor="rgba(99,102,241,0.10)", line_width=0,
-            annotation_text="匹配段", annotation_position="top left",
-            annotation_font_size=10, annotation_font_color="#6366f1",
-            row=1, col=1,
-        )
+        # 提取该股票的五维特征
+        stock_feats = extract_all_features_for_stock(grp)
 
-    # 成交量
-    bar_colors = []
-    for i, (c, o, m) in enumerate(zip(ctx["close"], ctx["open"], match_mask)):
-        if m:
-            bar_colors.append("#6366f1" if c >= o else "#a855f7")  # 匹配段用紫色
+        # 计算五维加权相似度
+        similarity = _weighted_similarity(target_feats, stock_feats, k_days)
+
+        if len(similarity) == 0:
+            continue
+
+        # 排除最近数据
+        window_end_dates = dates[k_days - 1:]
+        date_mask = window_end_dates < cutoff_str
+
+        if not date_mask.any():
+            continue
+
+        similarity[~date_mask] = -999
+
+        # 找本股票内最佳匹配
+        best_idx = int(np.argmax(similarity))
+        best_sim = similarity[best_idx]
+
+        if best_sim < 0.3:
+            continue
+
+        # ── 提取上下文 K 线 ───────────────────────────────────────────────
+        match_start = best_idx
+        match_end   = best_idx + k_days - 1
+
+        ctx_start = max(0, match_start - context_days)
+        ctx_end   = min(len(grp) - 1, match_end + context_days)
+
+        ctx_df = grp.iloc[ctx_start:ctx_end + 1].copy()
+        ctx_df["is_match"] = False
+        match_slice = slice(match_start - ctx_start, match_end - ctx_start + 1)
+        ctx_df.iloc[match_slice, ctx_df.columns.get_loc("is_match")] = True
+
+        # 后续涨跌幅
+        if match_end + 1 < len(grp):
+            future_end = min(match_end + context_days, len(grp) - 1)
+            future_close = grp.iloc[future_end]["close"]
+            match_close  = grp.iloc[match_end]["close"]
+            subsequent_ret = (future_close / match_close - 1) * 100
         else:
-            bar_colors.append("#22c55e" if c >= o else "#ef4444")
-    fig.add_trace(go.Bar(x=dates, y=ctx["vol"], name="成交量",
-                          marker_color=bar_colors, opacity=0.6), row=2, col=1)
+            subsequent_ret = None
 
-    fig.update_layout(
-        template="plotly_white", height=340, autosize=True,
-        xaxis_rangeslider_visible=False,
-        plot_bgcolor="#fafbff", paper_bgcolor="#ffffff",
-        font=dict(family="Nunito,sans-serif", color="#6b7280", size=10),
-        legend=dict(orientation="h", y=1.05, x=0,
-                    font=dict(size=9), bgcolor="rgba(0,0,0,0)"),
-        margin=dict(t=25, b=10, l=5, r=5),
-        showlegend=False,
-        hovermode="x unified",
-        dragmode=False,
-    )
-    fig.update_xaxes(gridcolor="#e5e7eb", gridwidth=0.5, zeroline=False)
-    fig.update_yaxes(gridcolor="#e5e7eb", gridwidth=0.5)
+        # ── 五维分项得分（展示用）──────────────────────────────────────────
+        detail = {}
+        for feat_name, weight in WEIGHTS.items():
+            t_seq = target_feats[feat_name]
+            s_seq = stock_feats[feat_name]
+            s_window = s_seq[match_start:match_end + 1]
+            if len(s_window) == len(t_seq):
+                t_std = t_seq.std()
+                s_std = s_window.std()
+                if t_std > 1e-10 and s_std > 1e-10:
+                    corr_val = np.corrcoef(t_seq, s_window)[0, 1]
+                else:
+                    corr_val = 0.0
+                detail[feat_name] = round(corr_val * 100, 1)
+            else:
+                detail[feat_name] = 0.0
 
-    st.plotly_chart(fig, use_container_width=True,
-                    config={"displayModeBar": False, "responsive": True,
-                            "scrollZoom": False})
+        all_candidates.append({
+            "ts_code":           code,
+            "similarity":        round(best_sim * 100, 1),
+            "match_start_date":  grp.iloc[match_start]["trade_date"],
+            "match_end_date":    grp.iloc[match_end]["trade_date"],
+            "subsequent_return": round(subsequent_ret, 2) if subsequent_ret is not None else None,
+            "context_df":        ctx_df,
+            "feature_detail":    detail,
+        })
+
+    # ── 排序取 Top N（去重：同一只股票只保留最佳）─────────────────────────
+    all_candidates.sort(key=lambda x: x["similarity"], reverse=True)
+
+    seen_codes = set()
+    results = []
+    for c in all_candidates:
+        if c["ts_code"] not in seen_codes:
+            seen_codes.add(c["ts_code"])
+            results.append(c)
+        if len(results) >= top_n:
+            break
+
+    return results
