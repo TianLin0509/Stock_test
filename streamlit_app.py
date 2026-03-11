@@ -600,7 +600,7 @@ def get_ai_client(model_name: str) -> tuple[OpenAI | None, dict | None, str | No
 
 
 def call_ai(client: OpenAI, cfg: dict, prompt: str,
-            system: str = "", max_tokens: int = 3200) -> tuple[str, str | None]:
+            system: str = "", max_tokens: int = 8000) -> tuple[str, str | None]:
     """
     调用 AI 模型。返回 (text, error_msg)。
     豆包走 responses API 联网搜索，其他走 chat.completions。
@@ -650,7 +650,7 @@ def call_ai(client: OpenAI, cfg: dict, prompt: str,
 
 
 def call_ai_stream(client: OpenAI, cfg: dict, prompt: str,
-                   system: str = "", max_tokens: int = 3200):
+                   system: str = "", max_tokens: int = 8000):
     """
     流式调用 AI 模型，yield 文本片段。
     豆包走 responses API 流式联网搜索。
@@ -1155,7 +1155,7 @@ def build_expectation_prompt(name, ts_code, info) -> tuple[str, str]:
 def analyze_expectation_gap(client, cfg, name, ts_code, info, news=None) -> tuple[str, str | None]:
     """兼容旧调用签名，内部使用 build_expectation_prompt"""
     prompt, system = build_expectation_prompt(name, ts_code, info)
-    return call_ai(client, cfg, prompt, system=system, max_tokens=3200)
+    return call_ai(client, cfg, prompt, system=system, max_tokens=8000)
 
 
 def build_trend_prompt(name, ts_code, price_smry, capital, dragon) -> tuple[str, str]:
@@ -1215,7 +1215,7 @@ def build_trend_prompt(name, ts_code, price_smry, capital, dragon) -> tuple[str,
 
 def analyze_trend(client, cfg, name, ts_code, price_smry, capital, dragon) -> tuple[str, str | None]:
     prompt, system = build_trend_prompt(name, ts_code, price_smry, capital, dragon)
-    return call_ai(client, cfg, prompt, system=system, max_tokens=3500)
+    return call_ai(client, cfg, prompt, system=system, max_tokens=8000)
 
 
 def build_fundamentals_prompt(name, ts_code, info, financial) -> tuple[str, str]:
@@ -1278,7 +1278,7 @@ def build_fundamentals_prompt(name, ts_code, info, financial) -> tuple[str, str]
 
 def analyze_fundamentals(client, cfg, name, ts_code, info, financial) -> tuple[str, str | None]:
     prompt, system = build_fundamentals_prompt(name, ts_code, info, financial)
-    return call_ai(client, cfg, prompt, system=system, max_tokens=3200)
+    return call_ai(client, cfg, prompt, system=system, max_tokens=8000)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1631,6 +1631,24 @@ def main():
         if client:
             psmry = price_summary(df)
 
+            def stream_with_fallback(prompt, system, max_tokens, label):
+                """流式输出，如果返回空则自动回退非流式"""
+                text = st.write_stream(
+                    call_ai_stream(client, cfg_now, prompt, system=system, max_tokens=max_tokens)
+                )
+                if text and text.strip():
+                    return text
+                # 流式返回空 → 回退非流式
+                st.caption(f"⏳ {label} 流式未返回内容，正在重试...")
+                fallback_text, err = call_ai(client, cfg_now, prompt, system=system, max_tokens=max_tokens)
+                if err:
+                    st.markdown(f'<div class="status-banner warn">⚠️ {label}失败：{err}</div>',
+                                unsafe_allow_html=True)
+                    return f"⚠️ {label}失败：{err}"
+                if fallback_text:
+                    st.markdown(fallback_text)
+                return fallback_text or ""
+
             # ── 流式分析：进度条 + 打字机效果 ──
             st.markdown(f"""<div class="status-banner info">
   🤖 <strong>{selected_model} 深度分析中</strong> — 每个模块完成后即时展示，无需等待全部完成
@@ -1641,8 +1659,7 @@ def main():
             # 1/3 预期差分析
             st.markdown("#### 🔍 预期差分析")
             prompt1, sys1 = build_expectation_prompt(name, ts_code, info)
-            text1 = st.write_stream(call_ai_stream(client, cfg_now, prompt1, system=sys1, max_tokens=3200))
-            analyses["expectation"] = text1 or ""
+            analyses["expectation"] = stream_with_fallback(prompt1, sys1, 8000, "预期差分析")
             progress_bar.progress(33, text="✅ 预期差完成 · 📈 2/3 趋势研判中...")
 
             st.markdown("---")
@@ -1650,8 +1667,7 @@ def main():
             # 2/3 趋势研判
             st.markdown("#### 📈 趋势研判")
             prompt2, sys2 = build_trend_prompt(name, ts_code, psmry, cap, dragon)
-            text2 = st.write_stream(call_ai_stream(client, cfg_now, prompt2, system=sys2, max_tokens=3500))
-            analyses["trend"] = text2 or ""
+            analyses["trend"] = stream_with_fallback(prompt2, sys2, 8000, "趋势研判")
             progress_bar.progress(66, text="✅ 趋势完成 · 📋 3/3 基本面剖析中...")
 
             st.markdown("---")
@@ -1659,8 +1675,7 @@ def main():
             # 3/3 基本面剖析
             st.markdown("#### 📋 基本面剖析")
             prompt3, sys3 = build_fundamentals_prompt(name, ts_code, info, fin)
-            text3 = st.write_stream(call_ai_stream(client, cfg_now, prompt3, system=sys3, max_tokens=3200))
-            analyses["fundamentals"] = text3 or ""
+            analyses["fundamentals"] = stream_with_fallback(prompt3, sys3, 8000, "基本面剖析")
             progress_bar.progress(100, text="🎉 全部分析完成！")
 
             st.success("✅ 分析完成！下方标签可查看完整结果，进入「MoE辩论裁决」获取操作建议。")
