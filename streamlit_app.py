@@ -140,7 +140,8 @@ def main():
 
         # 清除上一只股票的结果
         for k in ["analyses", "moe_results", "stock_fin",
-                   "stock_cap", "stock_dragon"]:
+                   "stock_cap", "stock_dragon", "qa_history",
+                   "similarity_results"]:
             st.session_state.pop(k, None)
         st.session_state["analyses"] = {}
 
