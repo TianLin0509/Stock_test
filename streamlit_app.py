@@ -4,6 +4,10 @@
 Multi-Model + Tushare · 模块化架构
 """
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent))
+
 import streamlit as st
 
 # ── Page Config（必须在最前面）──────────────────────────────────────────────
