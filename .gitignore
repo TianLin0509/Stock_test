@@ -1,6 +1,6 @@
 # API Keys — 绝对不能提交！
 .streamlit/secrets.toml
-secrets.toml.template
+secrets.toml
 
 # Python
 __pycache__/
