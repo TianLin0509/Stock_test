@@ -4,6 +4,7 @@ import streamlit as st
 import pandas as pd
 import tushare as ts
 import re
+import os
 from datetime import datetime, timedelta
 
 
@@ -17,14 +18,21 @@ TUSHARE_URL   = st.secrets.get("TUSHARE_URL", "http://lianghua.nanyangqiankun.to
 
 def _init_tushare():
     try:
+        import time as _time
         ts.set_token(TUSHARE_TOKEN)
         p = ts.pro_api(TUSHARE_TOKEN)
         p._DataApi__token = TUSHARE_TOKEN     # 必须！否则无法获取数据
         p._DataApi__http_url = TUSHARE_URL
-        test = p.trade_cal(exchange="SSE", start_date="20240101", end_date="20240103")
-        if test is None:
-            return None, "Tushare 接口返回空，请检查 Token 或网络"
-        return p, None
+        # 健康检查带重试
+        for attempt in range(1, 4):
+            try:
+                test = p.trade_cal(exchange="SSE", start_date="20240101", end_date="20240103")
+                if test is not None and not test.empty:
+                    return p, None
+            except Exception:
+                if attempt < 3:
+                    _time.sleep(2)
+        return None, "Tushare 接口返回空，请检查 Token 或网络"
     except Exception as e:
         return None, f"Tushare 初始化失败：{e}"
 
@@ -74,18 +82,59 @@ def ndays_ago(n: int) -> str:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# 通用重试
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _retry_call(fn, retries=3, delay=1):
+    """网络请求重试包装器，指数退避"""
+    import time as _time
+    for attempt in range(1, retries + 1):
+        try:
+            return fn()
+        except Exception as e:
+            if attempt < retries:
+                _time.sleep(delay)
+                delay *= 2
+            else:
+                raise
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # 数据获取
 # ══════════════════════════════════════════════════════════════════════════════
 
+# 股票列表 CSV 路径（上传到 GitHub，免走 API）
+_STOCK_LIST_CSV = os.path.join(os.path.dirname(__file__), "stock_list.csv")
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def load_stock_list() -> tuple[pd.DataFrame, str | None]:
+    """优先读本地 CSV，读不到再走 Tushare API"""
+    # 方案1：读本地文件（推荐，稳定不依赖网络）
+    if os.path.exists(_STOCK_LIST_CSV):
+        try:
+            df = pd.read_csv(_STOCK_LIST_CSV)
+            # CSV 里的列名可能是 ts_code,symbol,name,industry,list_date
+            # 线上需要 ts_code,symbol,name,industry,area,market
+            # 保留共有列，缺失列填空
+            for col in ["ts_code", "symbol", "name", "industry", "area", "market"]:
+                if col not in df.columns:
+                    df[col] = ""
+            return df, None
+        except Exception as e:
+            pass  # 文件损坏，回退到 API
+
+    # 方案2：走 Tushare API
     pro = get_pro()
     if pro is None:
         return pd.DataFrame(), _ts_err
     try:
-        df = pro.stock_basic(
-            exchange="", list_status="L",
-            fields="ts_code,symbol,name,industry,area,market"
+        df = _retry_call(
+            lambda: pro.stock_basic(
+                exchange="", list_status="L",
+                fields="ts_code,symbol,name,industry,area,market"
+            ),
+            retries=5, delay=2,
         )
         return (df if df is not None else pd.DataFrame()), None
     except Exception as e:
@@ -137,9 +186,12 @@ def get_basic_info(ts_code: str) -> tuple[dict, str | None]:
             result.update({"名称": row.get("name",""), "行业": row.get("industry",""),
                            "地区": row.get("area",""), "市场": row.get("market","")})
     try:
-        df_db = pro.daily_basic(
-            ts_code=ts_code, start_date=ndays_ago(10), end_date=today(),
-            fields="ts_code,trade_date,close,pe_ttm,pb,ps_ttm,total_mv,turnover_rate,volume_ratio"
+        df_db = _retry_call(
+            lambda: pro.daily_basic(
+                ts_code=ts_code, start_date=ndays_ago(10), end_date=today(),
+                fields="ts_code,trade_date,close,pe_ttm,pb,ps_ttm,total_mv,turnover_rate,volume_ratio"
+            ),
+            retries=3, delay=1,
         )
         if df_db is not None and not df_db.empty:
             row = df_db.iloc[0]
@@ -165,7 +217,10 @@ def get_price_df(ts_code: str, days: int = 140) -> tuple[pd.DataFrame, str | Non
     if pro is None:
         return pd.DataFrame(), _ts_err
     try:
-        df = pro.daily(ts_code=ts_code, start_date=ndays_ago(days), end_date=today())
+        df = _retry_call(
+            lambda: pro.daily(ts_code=ts_code, start_date=ndays_ago(days), end_date=today()),
+            retries=3, delay=1,
+        )
         if df is None or df.empty:
             return pd.DataFrame(), "未获取到K线数据，可能是停牌或代码有误"
         df = df.sort_values("trade_date").reset_index(drop=True)
@@ -186,10 +241,13 @@ def get_financial(ts_code: str) -> tuple[str, str | None]:
         return "", _ts_err
     parts, errs = [], []
     try:
-        df = pro.fina_indicator(
-            ts_code=ts_code,
-            fields="end_date,roe,roa,grossprofit_margin,netprofit_margin,"
-                   "debt_to_assets,current_ratio,quick_ratio,revenue_yoy,netprofit_yoy,basic_eps"
+        df = _retry_call(
+            lambda: pro.fina_indicator(
+                ts_code=ts_code,
+                fields="end_date,roe,roa,grossprofit_margin,netprofit_margin,"
+                       "debt_to_assets,current_ratio,quick_ratio,revenue_yoy,netprofit_yoy,basic_eps"
+            ),
+            retries=3, delay=1,
         )
         if df is not None and not df.empty:
             parts.append("核心财务指标（近5期）：\n" + df.head(5).to_string(index=False))
@@ -197,9 +255,12 @@ def get_financial(ts_code: str) -> tuple[str, str | None]:
         errs.append(f"财务指标：{e}")
     try:
         rpt = str((datetime.now().year - 1) * 10000 + 1231)
-        df2 = pro.income(
-            ts_code=ts_code, start_date=str(int(rpt)-30000), end_date=rpt,
-            fields="end_date,total_revenue,operate_profit,n_income,n_income_attr_p"
+        df2 = _retry_call(
+            lambda: pro.income(
+                ts_code=ts_code, start_date=str(int(rpt)-30000), end_date=rpt,
+                fields="end_date,total_revenue,operate_profit,n_income,n_income_attr_p"
+            ),
+            retries=3, delay=1,
         )
         if df2 is not None and not df2.empty:
             parts.append("利润表摘要（近4期）：\n" + df2.head(4).to_string(index=False))
@@ -216,11 +277,14 @@ def get_capital_flow(ts_code: str) -> tuple[str, str | None]:
     if pro is None:
         return "", _ts_err
     try:
-        df = pro.moneyflow(
-            ts_code=ts_code, start_date=ndays_ago(20), end_date=today(),
-            fields="trade_date,buy_sm_amount,buy_md_amount,buy_lg_amount,"
-                   "buy_elg_amount,sell_sm_amount,sell_md_amount,sell_lg_amount,"
-                   "sell_elg_amount,net_mf_amount"
+        df = _retry_call(
+            lambda: pro.moneyflow(
+                ts_code=ts_code, start_date=ndays_ago(20), end_date=today(),
+                fields="trade_date,buy_sm_amount,buy_md_amount,buy_lg_amount,"
+                       "buy_elg_amount,sell_sm_amount,sell_md_amount,sell_lg_amount,"
+                       "sell_elg_amount,net_mf_amount"
+            ),
+            retries=3, delay=1,
         )
         if df is not None and not df.empty:
             return df.sort_values("trade_date").tail(15).to_string(index=False), None
@@ -235,8 +299,11 @@ def get_dragon_tiger(ts_code: str) -> tuple[str, str | None]:
     if pro is None:
         return "", _ts_err
     try:
-        df = pro.top_list(trade_date=ndays_ago(30), ts_code=ts_code,
-                          fields="trade_date,name,close,pct_change,net_amount,reason")
+        df = _retry_call(
+            lambda: pro.top_list(trade_date=ndays_ago(30), ts_code=ts_code,
+                                  fields="trade_date,name,close,pct_change,net_amount,reason"),
+            retries=3, delay=1,
+        )
         if df is not None and not df.empty:
             return df.head(10).to_string(index=False), None
         return "近30日无龙虎榜记录", None
