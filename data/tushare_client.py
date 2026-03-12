@@ -18,7 +18,8 @@ TUSHARE_URL   = st.secrets.get("TUSHARE_URL", "http://lianghua.nanyangqiankun.to
 def _init_tushare():
     try:
         ts.set_token(TUSHARE_TOKEN)
-        p = ts.pro_api()
+        p = ts.pro_api(TUSHARE_TOKEN)
+        p._DataApi__token = TUSHARE_TOKEN     # 必须！否则无法获取数据
         p._DataApi__http_url = TUSHARE_URL
         test = p.trade_cal(exchange="SSE", start_date="20240101", end_date="20240103")
         if test is None:
