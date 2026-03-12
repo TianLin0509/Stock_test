@@ -1,5 +1,6 @@
 """MoE 多角色辩论裁决 v2 — 智能摘要，不丢失关键结论"""
 
+import time
 import streamlit as st
 from ai.client import call_ai
 from ai.context import build_analysis_context
@@ -32,14 +33,18 @@ CEO_SYSTEM = (
 def run_moe(client, cfg, name, ts_code, analyses: dict) -> None:
     code6 = to_code6(ts_code)
 
-    # ── 智能摘要（替代硬切片）──────────────────────────────────────────
-    context = build_analysis_context(analyses, max_per_module=15)
+    with st.status(f"🎯 MoE 多方辩论 · {name}", expanded=True) as status:
+        st.write("📋 汇总预期差、趋势、基本面三项分析结果...")
+        time.sleep(0.5)
+        context = build_analysis_context(analyses, max_per_module=15)
+        st.write("🏟️ 召集四方专家进入辩论会场...")
+        time.sleep(0.5)
 
-    role_results: dict[str, str] = {}
-    ai_errors = []
+        role_results: dict[str, str] = {}
+        ai_errors = []
 
-    for role in MOE_ROLES:
-        with st.spinner(f"{role['badge']} 发表观点中..."):
+        for i, role in enumerate(MOE_ROLES, 1):
+            st.write(f"🎙️ [{i}/{len(MOE_ROLES)}] {role['badge']} 正在发表观点...")
             prompt = f"""辩论标的：{name}（{code6}）
 
 ## 分析背景
@@ -59,30 +64,21 @@ def run_moe(client, cfg, name, ts_code, analyses: dict) -> None:
 保持角色特色和语言风格。"""
             text, err = call_ai(client, cfg, prompt,
                                 system=role["system"], max_tokens=800)
-        if err:
-            text = f"⚠️ 该角色分析失败：{err}"
-            ai_errors.append(err)
-        role_results[role["key"]] = text
-        st.markdown(f"""<div class="role-card {role['css']}">
-  <div class="role-badge">{role['badge']}</div>
-  <div class="role-content">{text}</div>
-</div>""", unsafe_allow_html=True)
+            if err:
+                text = f"⚠️ 该角色分析失败：{err}"
+                ai_errors.append(err)
+            role_results[role["key"]] = text
+            st.write(f"  ✓ {role['badge']} 观点已提交")
+            time.sleep(0.3)
 
-    if ai_errors:
-        st.markdown(
-            f'<div class="status-banner warn">⚠️ 部分角色调用失败，建议切换模型重试：{ai_errors[0]}</div>',
-            unsafe_allow_html=True,
+        st.write("👔 首席执行官正在综合四方观点，做最终裁决...")
+        time.sleep(0.4)
+
+        roles_text = "\n\n".join(
+            f"【{r['badge']}】\n{role_results.get(r['key'], '')}"
+            for r in MOE_ROLES
         )
 
-    st.markdown("---")
-
-    # ── CEO 裁决 ──────────────────────────────────────────────────────
-    roles_text = "\n\n".join(
-        f"【{r['badge']}】\n{role_results.get(r['key'], '')}"
-        for r in MOE_ROLES
-    )
-
-    with st.spinner("👔 首席执行官 综合裁决中..."):
         ceo_prompt = f"""标的：{name}（{code6}）
 
 ## 四位专家观点
@@ -124,13 +120,11 @@ def run_moe(client, cfg, name, ts_code, analyses: dict) -> None:
         ceo_text, ceo_err = call_ai(client, cfg, ceo_prompt,
                                      system=CEO_SYSTEM, max_tokens=2000)
 
-    if ceo_err:
-        ceo_text = f"⚠️ CEO裁决生成失败：{ceo_err}\n\n建议切换其他模型后重新尝试。"
-
-    st.markdown(f"""<div class="role-card r-ceo">
-  <div class="role-badge">👔 首席执行官 · 最终裁决</div>
-  <div class="role-content">{ceo_text}</div>
-</div>""", unsafe_allow_html=True)
+        if ceo_err:
+            ceo_text = f"⚠️ CEO裁决生成失败：{ceo_err}\n\n建议切换其他模型后重新尝试。"
+            status.update(label=f"⚠️ MoE 辩论完成（部分错误）", state="complete")
+        else:
+            status.update(label=f"✅ MoE 四方辩论裁决完成！", state="complete")
 
     st.session_state["moe_results"] = {
         "roles": role_results, "ceo": ceo_text, "done": True,

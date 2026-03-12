@@ -1,137 +1,192 @@
-"""分析执行与结果展示 — 分离执行逻辑和展示逻辑"""
+"""分析结果展示 — 读取后台任务进度和结果"""
 
+import time
 import streamlit as st
 import pandas as pd
-from ui.charts import render_kline, render_similar_case
-from analysis.moe import run_moe, MOE_ROLES
-from ai.client import call_ai, call_ai_stream
+from analysis.moe import MOE_ROLES
+from analysis.runner import get_jobs, is_running, is_done, start_analysis
+from ai.client import call_ai
 from ai.context import build_analysis_context
-from ai.prompts import (
-    build_expectation_prompt,
-    build_trend_prompt,
-    build_fundamentals_prompt,
-)
-from data.tushare_client import price_summary
-from data.similarity import load_history, find_similar
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 流式输出工具
+# 进度/结果渲染工具
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _stream_with_fallback(client, cfg, prompt, system, max_tokens, label):
-    """流式输出，返回空则回退非流式"""
-    text = st.write_stream(
-        call_ai_stream(client, cfg, prompt, system=system, max_tokens=max_tokens)
-    )
-    if text and text.strip():
-        return text
-    st.caption(f"⏳ {label} 流式未返回内容，正在重试...")
-    fallback_text, err = call_ai(
-        client, cfg, prompt, system=system, max_tokens=max_tokens,
-    )
-    if err:
-        st.markdown(
-            f'<div class="status-banner warn">⚠️ {label}失败：{err}</div>',
-            unsafe_allow_html=True,
-        )
-        return f"⚠️ {label}失败：{err}"
-    if fallback_text:
-        st.markdown(fallback_text)
-    return fallback_text or ""
+def _show_job_progress(key: str, title: str):
+    """显示后台任务的实时进度"""
+    jobs = get_jobs(st.session_state)
+    job = jobs.get(key, {})
+    status = job.get("status", "")
+    progress = job.get("progress", [])
+
+    if status == "running":
+        label = f"⏳ {title}..."
+        with st.status(label, expanded=True, state="running"):
+            for msg in progress:
+                st.write(msg)
+    elif status == "done" and job.get("error"):
+        with st.status(f"❌ {title}失败", expanded=True, state="error"):
+            for msg in progress:
+                st.write(msg)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# 分析执行（根据 actions 字典决定跑哪些模块）
-# ══════════════════════════════════════════════════════════════════════════════
-
-def run_analysis(client, cfg, model_name: str, actions: dict):
-    """
-    执行分析模块
-    actions: {"expectation": bool, "trend": bool, "fundamentals": bool,
-              "moe": bool, "qa": bool}
-    """
+def _show_analysis_result(key: str, title: str, icon: str):
+    """显示分析结果：运行中显示进度，完成显示结果"""
     analyses = st.session_state.get("analyses", {})
+    content = analyses.get(key, "")
+
+    if is_running(st.session_state, key):
+        _show_job_progress(key, title)
+    elif content:
+        name = st.session_state.get("stock_name", "")
+        st.markdown(f"#### {icon} {name} · {title}结果")
+        with st.container(border=True):
+            st.markdown(content)
+    else:
+        st.info(f"{title}尚未执行，点击上方按钮开始分析")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 主展示函数
+# ══════════════════════════════════════════════════════════════════════════════
+
+def show_completed_results(client=None, cfg=None, model_name=""):
+    """根据 active_tab 展示对应内容"""
     name     = st.session_state.get("stock_name", "")
     tscode   = st.session_state.get("stock_code", "")
-    df       = st.session_state.get("price_df", pd.DataFrame())
-    info     = st.session_state.get("stock_info", {})
-    has_client = client is not None
+    analyses = st.session_state.get("analyses", {})
+    active_tab = st.session_state.get("active_tab", "")
 
-    # ── 预期差分析 ────────────────────────────────────────────────────────
-    if actions.get("expectation") and has_client:
-        st.markdown("---")
-        st.markdown(f"""<div class="status-banner info">
-  🤖 <strong>{model_name}</strong> · 🔍 预期差分析中（联网搜索最新资讯）...
-</div>""", unsafe_allow_html=True)
-        p, s = build_expectation_prompt(name, tscode, info)
-        result = _stream_with_fallback(client, cfg, p, s, 8000, "预期差分析")
-        analyses["expectation"] = result
-        st.session_state["analyses"] = analyses
-        st.success("✅ 预期差分析完成！")
+    if not name or not active_tab:
+        return
 
-    # ── 趋势分析 ──────────────────────────────────────────────────────────
-    if actions.get("trend") and has_client:
-        st.markdown("---")
-        st.markdown(f"""<div class="status-banner info">
-  🤖 <strong>{model_name}</strong> · 📈 趋势研判中...
-</div>""", unsafe_allow_html=True)
-        psmry  = price_summary(df)
-        cap    = st.session_state.get("stock_cap", "")
-        dragon = st.session_state.get("stock_dragon", "")
-        p, s = build_trend_prompt(name, tscode, psmry, cap, dragon)
-        result = _stream_with_fallback(client, cfg, p, s, 8000, "趋势研判")
-        analyses["trend"] = result
-        st.session_state["analyses"] = analyses
-        st.success("✅ 趋势研判完成！")
+    st.markdown("---")
 
-    # ── 基本面分析 ────────────────────────────────────────────────────────
-    if actions.get("fundamentals") and has_client:
-        st.markdown("---")
-        st.markdown(f"""<div class="status-banner info">
-  🤖 <strong>{model_name}</strong> · 📋 基本面剖析中...
-</div>""", unsafe_allow_html=True)
-        fin = st.session_state.get("stock_fin", "")
-        p, s = build_fundamentals_prompt(name, tscode, info, fin)
-        result = _stream_with_fallback(client, cfg, p, s, 8000, "基本面剖析")
-        analyses["fundamentals"] = result
-        st.session_state["analyses"] = analyses
-        st.success("✅ 基本面剖析完成！")
+    if active_tab == "expectation":
+        _show_analysis_result("expectation", "预期差分析", "🔍")
 
-    # ── MoE 辩论裁决 ──────────────────────────────────────────────────────
-    if actions.get("moe") and has_client:
-        exp_done   = bool(analyses.get("expectation"))
-        trend_done = bool(analyses.get("trend"))
-        fund_done  = bool(analyses.get("fundamentals"))
+    elif active_tab == "trend":
+        _show_analysis_result("trend", "K线趋势研判", "📈")
+
+    elif active_tab == "fundamentals":
+        _show_analysis_result("fundamentals", "基本面分析", "📋")
+
+    elif active_tab == "moe":
+        _show_moe_tab(client, cfg, model_name)
+
+    elif active_tab == "all":
+        _show_all_tab(client, cfg, model_name)
+
+    elif active_tab == "qa":
+        _render_free_question(client, cfg, model_name, name, tscode,
+                              st.session_state.get("stock_info", {}), analyses)
+
+
+def _show_moe_tab(client, cfg, model_name):
+    """MoE 辩论 tab"""
+    analyses = st.session_state.get("analyses", {})
+    moe_done = bool(st.session_state.get("moe_results", {}).get("done"))
+
+    if is_running(st.session_state, "moe"):
+        _show_job_progress("moe", "MoE 多方辩论")
+    elif moe_done:
+        _render_moe_results()
+    else:
+        # 检查前置条件
         missing = []
-        if not exp_done:   missing.append("🔍 预期差分析")
-        if not trend_done: missing.append("📈 趋势分析")
-        if not fund_done:  missing.append("📋 基本面分析")
+        if not analyses.get("expectation"): missing.append("预期差分析")
+        if not analyses.get("trend"):       missing.append("趋势分析")
+        if not analyses.get("fundamentals"): missing.append("基本面分析")
 
         if missing:
-            st.markdown("---")
-            st.markdown(f"""<div class="status-banner warn">
-  ⚠️ <strong>MoE 辩论需要前三项分析结果</strong><br>
-  请先完成：{'、'.join(missing)}
-</div>""", unsafe_allow_html=True)
+            running_keys = [k for k in ["expectation", "trend", "fundamentals"]
+                           if is_running(st.session_state, k)]
+            if running_keys:
+                st.info(f"前置分析正在进行中，完成后可启动 MoE 辩论")
+                _show_running_summary()
+            else:
+                st.warning(f"MoE 辩论需要先完成：{'、'.join(missing)}")
         else:
-            st.markdown("---")
-            st.markdown(f"""<div class="status-banner info">
-  🤖 <strong>{model_name}</strong> · 🎯 MoE 四方辩论裁决中...
+            # 前三项都完成了，自动启动 MoE
+            if client and not is_running(st.session_state, "moe"):
+                start_analysis(st.session_state, "moe", client, cfg, model_name)
+                time.sleep(0.5)
+                st.rerun()
+
+
+def _show_all_tab(client, cfg, model_name):
+    """一键分析 tab — 显示所有分析的状态"""
+    analyses = st.session_state.get("analyses", {})
+    moe_done = bool(st.session_state.get("moe_results", {}).get("done"))
+
+    # 显示每项分析状态
+    items = [
+        ("expectation", "预期差分析", "🔍"),
+        ("trend", "K线趋势研判", "📈"),
+        ("fundamentals", "基本面分析", "📋"),
+        ("moe", "MoE辩论", "🎯"),
+    ]
+
+    for key, title, icon in items:
+        if key == "moe":
+            done = moe_done
+        else:
+            done = bool(analyses.get(key))
+
+        if is_running(st.session_state, key):
+            _show_job_progress(key, title)
+        elif done:
+            if key == "moe":
+                _render_moe_results()
+            else:
+                content = analyses.get(key, "")
+                if content:
+                    name = st.session_state.get("stock_name", "")
+                    st.markdown(f"#### {icon} {name} · {title}结果")
+                    with st.container(border=True):
+                        st.markdown(content)
+
+    # 三项都完成且 MoE 未启动 → 自动启动 MoE
+    all_three_done = all(analyses.get(k) for k in ["expectation", "trend", "fundamentals"])
+    if all_three_done and not moe_done and not is_running(st.session_state, "moe") and client:
+        start_analysis(st.session_state, "moe", client, cfg, model_name)
+        time.sleep(0.5)
+        st.rerun()
+
+
+def _show_running_summary():
+    """显示正在运行的任务列表"""
+    jobs = get_jobs(st.session_state)
+    names = {"expectation": "预期差分析", "trend": "K线趋势", "fundamentals": "基本面", "moe": "MoE辩论"}
+    for key, name in names.items():
+        job = jobs.get(key, {})
+        if job.get("status") == "running":
+            progress = job.get("progress", [])
+            last_msg = progress[-1] if progress else "启动中..."
+            st.caption(f"⏳ {name}：{last_msg}")
+
+
+def _render_moe_results():
+    moe = st.session_state.get("moe_results", {})
+    if not moe.get("done"):
+        return
+    name = st.session_state.get("stock_name", "")
+    st.markdown(f"#### 🎯 {name} · MoE 辩论裁决结果")
+    for role in MOE_ROLES:
+        text = moe["roles"].get(role["key"], "")
+        st.markdown(f"""<div class="role-card {role['css']}">
+  <div class="role-badge">{role['badge']}</div>
+  <div class="role-content">{text}</div>
 </div>""", unsafe_allow_html=True)
-            run_moe(client, cfg, name, tscode, analyses)
+    st.markdown("---")
+    st.markdown(f"""<div class="role-card r-ceo">
+  <div class="role-badge">👔 首席执行官 · 最终裁决</div>
+  <div class="role-content">{moe['ceo']}</div>
+</div>""", unsafe_allow_html=True)
 
-    # ── 自由提问 ──────────────────────────────────────────────────────────
-    if actions.get("qa") and has_client:
-        _render_free_question(client, cfg, model_name, name, tscode, info, analyses)
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# 自由提问
-# ══════════════════════════════════════════════════════════════════════════════
 
 def _render_free_question(client, cfg, model_name, name, tscode, info, analyses):
-    st.markdown("---")
     st.markdown(f"#### 💬 自由提问 · {name}")
 
     done_modules = []
@@ -157,25 +212,29 @@ def _render_free_question(client, cfg, model_name, name, tscode, info, analyses)
         if not question or not question.strip():
             st.warning("请输入你的问题")
             return
+        if not client:
+            st.warning("AI 模型不可用，请检查 API Key")
+            return
 
-        st.markdown(f"""<div class="status-banner info">
-  🤖 <strong>{model_name}</strong> · 💬 正在回答...
-</div>""", unsafe_allow_html=True)
+        with st.status("💬 正在回答你的问题...", expanded=True) as status:
+            st.write(f"📡 正在连接 {model_name}...")
+            time.sleep(0.5)
+            st.write("📎 整理已有分析上下文作为参考...")
+            context = build_analysis_context(analyses, max_per_module=12)
+            time.sleep(0.4)
+            metrics_parts = []
+            for k in ["最新价(元)", "市盈率TTM", "市净率PB", "行业"]:
+                v = info.get(k, "")
+                if v and str(v) != "N/A":
+                    metrics_parts.append(f"{k}={v}")
+            metrics_line = " | ".join(metrics_parts) if metrics_parts else "暂无"
 
-        context = build_analysis_context(analyses, max_per_module=12)
-        metrics_parts = []
-        for k in ["最新价(元)", "市盈率TTM", "市净率PB", "行业"]:
-            v = info.get(k, "")
-            if v and str(v) != "N/A":
-                metrics_parts.append(f"{k}={v}")
-        metrics_line = " | ".join(metrics_parts) if metrics_parts else "暂无"
-
-        system = (
-            f"你是一位专业的A股投资顾问，正在为用户分析 {name}（{tscode}）。"
-            f"\n回答原则：以用户问题为核心，引用已有分析结论，联网搜索最新信息，"
-            f"回答要具体有数据支撑，涉及操作建议时附带风险提示。"
-        )
-        prompt = f"""## 股票：{name}（{tscode}）
+            system = (
+                f"你是一位专业的A股投资顾问，正在为用户分析 {name}（{tscode}）。"
+                f"\n回答原则：以用户问题为核心，引用已有分析结论，联网搜索最新信息，"
+                f"回答要具体有数据支撑，涉及操作建议时附带风险提示。"
+            )
+            prompt = f"""## 股票：{name}（{tscode}）
 ## 关键指标：{metrics_line}
 
 ## 已有分析上下文（仅供参考，以用户问题为主）
@@ -187,153 +246,29 @@ def _render_free_question(client, cfg, model_name, name, tscode, info, analyses)
 
 请用中文详细回答。如果问题涉及最新信息，请通过联网搜索获取。"""
 
-        result = _stream_with_fallback(client, cfg, prompt, system, 8000, "自由提问")
+            st.write("🌐 联网搜索最新信息...")
+            time.sleep(0.4)
+            st.write("🤖 AI 正在思考并组织回答...")
+            result, err = call_ai(client, cfg, prompt, system=system, max_tokens=8000)
+
+            if err:
+                status.update(label="❌ 回答失败", state="error")
+                st.error(f"回答失败：{err}")
+                return
+            st.write("📝 整理回答内容...")
+            time.sleep(0.3)
+            status.update(label="✅ 回答完成！", state="complete")
+
         qa_history = st.session_state.get("qa_history", [])
         qa_history.append({"question": question, "answer": result})
         st.session_state["qa_history"] = qa_history
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# 结果展示（K线 + 相似走势 + 分析结果 Tab 页）
-# ══════════════════════════════════════════════════════════════════════════════
-
-def show_completed_results():
-    """展示 K 线图 + 已完成的分析结果"""
-    name   = st.session_state.get("stock_name", "")
-    tscode = st.session_state.get("stock_code", "")
-    df     = st.session_state.get("price_df", pd.DataFrame())
-    analyses = st.session_state.get("analyses", {})
-
-    if not name:
-        return
-
-    # ── K线图 ─────────────────────────────────────────────────────────────
-    st.markdown("---")
-    render_kline(df, name, tscode)
-
-    # ── 历史相似走势 ──────────────────────────────────────────────────────
-    _render_similarity_section(df, tscode, name)
-
-    # ── 分析结果 Tab 页 ──────────────────────────────────────────────────
-    has_any = (
-        analyses.get("expectation") or analyses.get("trend")
-        or analyses.get("fundamentals")
-        or st.session_state.get("moe_results", {}).get("done")
-        or st.session_state.get("qa_history")
-    )
-    if not has_any:
-        return
-
-    st.markdown("---")
-    st.markdown("#### 📊 分析结果")
-
-    tabs, tab_keys = [], []
-    if analyses.get("expectation"):
-        tabs.append("🔍 预期差"); tab_keys.append("expectation")
-    if analyses.get("trend"):
-        tabs.append("📈 趋势"); tab_keys.append("trend")
-    if analyses.get("fundamentals"):
-        tabs.append("📋 基本面"); tab_keys.append("fundamentals")
-    if st.session_state.get("moe_results", {}).get("done"):
-        tabs.append("🎯 MoE辩论"); tab_keys.append("moe")
-    if st.session_state.get("qa_history"):
-        tabs.append("💬 提问记录"); tab_keys.append("qa")
-
-    if not tabs:
-        return
-
-    tab_objs = st.tabs(tabs)
-    for tab_obj, key in zip(tab_objs, tab_keys):
-        with tab_obj:
-            if key == "moe":
-                _render_moe_results()
-            elif key == "qa":
-                _render_qa_history()
-            else:
-                content = analyses.get(key, "")
-                if content:
-                    with st.container(border=True):
-                        st.markdown(content)
-
-
-def _render_moe_results():
-    moe = st.session_state.get("moe_results", {})
-    if not moe.get("done"):
-        return
-    for role in MOE_ROLES:
-        text = moe["roles"].get(role["key"], "")
-        st.markdown(f"""<div class="role-card {role['css']}">
-  <div class="role-badge">{role['badge']}</div>
-  <div class="role-content">{text}</div>
-</div>""", unsafe_allow_html=True)
-    st.markdown("---")
-    st.markdown(f"""<div class="role-card r-ceo">
-  <div class="role-badge">👔 首席执行官 · 最终裁决</div>
-  <div class="role-content">{moe['ceo']}</div>
-</div>""", unsafe_allow_html=True)
-
-
-def _render_qa_history():
+    # 显示历史问答
     qa_history = st.session_state.get("qa_history", [])
-    for i, item in enumerate(reversed(qa_history), 1):
-        st.markdown(f"**🙋 问题 {len(qa_history) - i + 1}：** {item['question']}")
-        with st.container(border=True):
-            st.markdown(item["answer"])
-        if i < len(qa_history):
-            st.markdown("")
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# 历史相似走势
-# ══════════════════════════════════════════════════════════════════════════════
-
-def _render_similarity_section(df, tscode, name):
-    history = load_history()
-    has_history = not history.empty
-
-    with st.expander("🔎 历史相似走势匹配（全市场搜索，不消耗 Token）", expanded=False):
-        if not has_history:
-            st.warning(
-                "⚠️ 尚未构建历史数据库。请先运行离线脚本：\n\n"
-                "```bash\nexport TUSHARE_TOKEN='你的token'\n"
-                "python data/build_history.py\n```\n\n"
-                "构建完成后将 `data/history/all_daily.parquet` 放入项目目录即可。"
-            )
-            return
-        if df.empty:
-            st.info("需要先查询股票获取 K 线数据")
-            return
-
-        stock_count = history["ts_code"].nunique()
-        date_range = f"{history['trade_date'].min()} ~ {history['trade_date'].max()}"
-        st.caption(f"📊 历史数据库：{stock_count} 只股票 · {date_range}")
-
-        col_k, col_btn = st.columns([1, 1])
-        with col_k:
-            k_days = st.selectbox("匹配窗口天数", options=[3, 5, 10, 20],
-                                  index=1, key="sim_k_days")
-        with col_btn:
-            st.markdown("<br>", unsafe_allow_html=True)
-            run_sim = st.button("🚀 搜索相似走势", type="primary",
-                                use_container_width=True, key="run_similarity")
-
-        if run_sim:
-            if len(df) < k_days:
-                st.warning(f"K线数据不足 {k_days} 天")
-                return
-            with st.spinner(f"🔍 在 {stock_count} 只股票中搜索..."):
-                results = find_similar(target_df=df, k_days=k_days, top_n=3,
-                                       context_days=10, exclude_code=tscode)
-            if not results:
-                st.info("未找到足够相似的历史走势（阈值 > 30%）")
-                return
-            st.session_state["similarity_results"] = results
-            st.success(f"✅ 找到 {len(results)} 个相似走势案例！")
-
-        saved = st.session_state.get("similarity_results", [])
-        if saved:
-            st.markdown("---")
-            for i, case in enumerate(saved, 1):
-                render_similar_case(case, i)
-                if i < len(saved):
-                    st.markdown("")
+    if qa_history:
+        for i, item in enumerate(reversed(qa_history), 1):
+            st.markdown(f"**🙋 问题 {len(qa_history) - i + 1}：** {item['question']}")
+            with st.container(border=True):
+                st.markdown(item["answer"])
+            if i < len(qa_history):
+                st.markdown("")

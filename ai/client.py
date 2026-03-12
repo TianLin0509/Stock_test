@@ -1,9 +1,44 @@
 """AI 客户端 — 多 Provider 统一调用层"""
 
+import threading
 from openai import OpenAI, APIConnectionError, AuthenticationError, RateLimitError
 from config import MODEL_CONFIGS
 from ai.doubao import doubao_call, doubao_stream
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 全局 Token 计数器（线程安全）
+# ══════════════════════════════════════════════════════════════════════════════
+
+_token_lock = threading.Lock()
+_token_usage = {"prompt": 0, "completion": 0, "total": 0}
+
+
+def add_tokens(prompt_tokens: int = 0, completion_tokens: int = 0, total_tokens: int = 0):
+    """累加 token 用量"""
+    with _token_lock:
+        _token_usage["prompt"] += prompt_tokens
+        _token_usage["completion"] += completion_tokens
+        _token_usage["total"] += total_tokens or (prompt_tokens + completion_tokens)
+
+
+def get_token_usage() -> dict:
+    """获取当前累计 token 用量"""
+    with _token_lock:
+        return dict(_token_usage)
+
+
+def reset_token_usage():
+    """重置 token 计数"""
+    with _token_lock:
+        _token_usage["prompt"] = 0
+        _token_usage["completion"] = 0
+        _token_usage["total"] = 0
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# AI 客户端
+# ══════════════════════════════════════════════════════════════════════════════
 
 def get_ai_client(model_name: str) -> tuple[OpenAI | None, dict | None, str | None]:
     """返回 (client, config, error_msg)"""
@@ -58,7 +93,12 @@ def call_ai(client: OpenAI, cfg: dict, prompt: str,
 
     # 豆包专属路径
     if cfg.get("provider") == "doubao" and cfg.get("supports_search"):
-        return doubao_call(cfg, messages, max_tokens)
+        text, err = doubao_call(cfg, messages, max_tokens)
+        if not err:
+            # 豆包按字符粗估 token（1 中文字 ≈ 2 token）
+            est = len(prompt) + len(text)
+            add_tokens(total_tokens=est)
+        return text, err
 
     extra = _build_extra(cfg)
     try:
@@ -69,6 +109,15 @@ def call_ai(client: OpenAI, cfg: dict, prompt: str,
             **extra,
         )
         text = resp.choices[0].message.content or ""
+
+        # 提取 token 用量
+        if hasattr(resp, "usage") and resp.usage:
+            add_tokens(
+                prompt_tokens=resp.usage.prompt_tokens or 0,
+                completion_tokens=resp.usage.completion_tokens or 0,
+                total_tokens=resp.usage.total_tokens or 0,
+            )
+
         return text, None
 
     except AuthenticationError as e:
