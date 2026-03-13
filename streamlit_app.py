@@ -160,7 +160,7 @@ def main():
             return f"✅ {name}完成"
         return f"{icon} {name}"
 
-    bc1, bc2, bc3, bc4, bc5, bc6, bc7 = st.columns(7)
+    bc1, bc2, bc3, bc4, bc5, bc6, bc7, bc8 = st.columns(8)
     with bc1:
         btn_exp = st.button(_label("expectation", "预期差分析", "🔍"),
                             use_container_width=True)
@@ -178,6 +178,8 @@ def main():
     with bc6:
         btn_all = st.button("🚀 一键分析", type="primary", use_container_width=True)
     with bc7:
+        btn_sim = st.button("📐 K线匹配", use_container_width=True)
+    with bc8:
         btn_mystic = st.button("🔮 玄学炒股", use_container_width=True)
 
     # ══════════════════════════════════════════════════════════════════════
@@ -236,7 +238,7 @@ def main():
     # 按钮响应
     # ══════════════════════════════════════════════════════════════════════
     stock_ready = bool(st.session_state.get("stock_name"))
-    any_btn = btn_exp or btn_trend or btn_fund or btn_moe or btn_qa or btn_all or btn_mystic
+    any_btn = btn_exp or btn_trend or btn_fund or btn_moe or btn_qa or btn_all or btn_sim or btn_mystic
 
     # 玄学炒股不需要先查询股票，单独处理
     if btn_mystic:
@@ -279,6 +281,8 @@ def main():
                 if not missing:
                     start_analysis(st.session_state, "moe", client, cfg_now, selected_model)
                     st.rerun()
+        elif btn_sim:
+            st.session_state["active_tab"] = "similarity"
         elif btn_qa:
             st.session_state["active_tab"] = "qa"
         elif btn_all:

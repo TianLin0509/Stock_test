@@ -68,6 +68,8 @@ def show_completed_results(client=None, cfg=None, model_name=""):
 
     elif active_tab == "trend":
         _show_analysis_result("trend", "K线趋势研判", "📈")
+
+    elif active_tab == "similarity":
         _show_similarity_section(name, tscode)
 
     elif active_tab == "fundamentals":
