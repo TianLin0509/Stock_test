@@ -75,8 +75,8 @@ def render_similar_case(case: dict, idx: int) -> None:
 
     code = case["ts_code"]
     sim  = case["similarity"]
-    start_d = case["match_start_date"]
-    end_d   = case["match_end_date"]
+    start_d = str(int(case["match_start_date"])) if isinstance(case["match_start_date"], float) else case["match_start_date"]
+    end_d   = str(int(case["match_end_date"])) if isinstance(case["match_end_date"], float) else case["match_end_date"]
     ret     = case["subsequent_return"]
 
     ret_text = f"后续走势 **{ret:+.1f}%**" if ret is not None else "后续数据不足"
@@ -109,7 +109,11 @@ def render_similar_case(case: dict, idx: int) -> None:
 
     # 匹配段与上下文分开着色
     match_mask = ctx["is_match"].values
-    dates  = ctx["trade_date"].values
+    # 日期格式化：float 20210315.0 → str "2021-03-15"
+    raw_dates = ctx["trade_date"].values
+    dates = [f"{int(d)//10000}-{int(d)%10000//100:02d}-{int(d)%100:02d}"
+             if isinstance(d, (float, int)) and d > 19000000 else str(d)
+             for d in raw_dates]
 
     # K 线
     fig.add_trace(go.Candlestick(

@@ -68,6 +68,7 @@ def show_completed_results(client=None, cfg=None, model_name=""):
 
     elif active_tab == "trend":
         _show_analysis_result("trend", "K线趋势研判", "📈")
+        _show_similarity_section(name, tscode)
 
     elif active_tab == "fundamentals":
         _show_analysis_result("fundamentals", "基本面分析", "📋")
@@ -272,3 +273,91 @@ def _render_free_question(client, cfg, model_name, name, tscode, info, analyses)
                 st.markdown(item["answer"])
             if i < len(qa_history):
                 st.markdown("")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# K线相似走势匹配
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _show_similarity_section(name: str, tscode: str):
+    """在 K线趋势 tab 下方展示历史相似走势匹配"""
+    from data.similarity import find_similar, HISTORY_FILE
+    from ui.charts import render_similar_case
+    import os
+
+    # 历史数据文件不存在则跳过
+    if not os.path.exists(HISTORY_FILE):
+        return
+
+    price_df = st.session_state.get("price_df", pd.DataFrame())
+    if price_df.empty or len(price_df) < 5:
+        return
+
+    st.markdown("---")
+    st.markdown(f"#### 📐 历史相似走势匹配 · {name}")
+    st.caption(
+        "基于最近5个交易日的五维K线特征（涨跌幅 · 振幅 · 量能节奏 · 上影线 · 下影线），"
+        "在全市场5年历史数据中搜索最相似的走势，并展示匹配段前后各10天的完整走势供参考。"
+    )
+
+    # 检查缓存
+    cached = st.session_state.get("similarity_results")
+    if cached and cached.get("ts_code") == tscode:
+        _render_similarity_results(cached["results"])
+        return
+
+    if st.button("🔍 开始匹配历史走势", type="primary", key="btn_similarity"):
+        with st.status("📐 正在全市场搜索相似走势...", expanded=True) as status:
+            st.write("📊 加载全市场5年日线数据（首次较慢）...")
+            st.write("🔢 提取目标股票五维K线特征...")
+            st.write(f"🔍 在5400+只股票中逐一滑窗匹配...")
+
+            results = find_similar(
+                target_df=price_df,
+                k_days=5,
+                top_n=3,
+                context_days=10,
+                exclude_code=tscode,
+                exclude_recent_days=60,
+            )
+
+            if results:
+                st.write(f"✅ 找到 {len(results)} 个高度相似的历史案例！")
+                status.update(label="✅ 匹配完成！", state="complete")
+            else:
+                st.write("未找到足够相似的历史走势")
+                status.update(label="⚠️ 未找到匹配", state="complete")
+
+        # 缓存结果
+        st.session_state["similarity_results"] = {
+            "ts_code": tscode,
+            "results": results,
+        }
+
+        if results:
+            _render_similarity_results(results)
+
+
+def _render_similarity_results(results: list):
+    """渲染相似走势匹配结果"""
+    from ui.charts import render_similar_case
+
+    if not results:
+        st.info("未找到足够相似的历史走势案例")
+        return
+
+    # 后续走势统计
+    returns = [r["subsequent_return"] for r in results if r["subsequent_return"] is not None]
+    if returns:
+        avg_ret = sum(returns) / len(returns)
+        up_count = sum(1 for r in returns if r > 0)
+        color = "🟢" if avg_ret > 0 else "🔴"
+        st.markdown(
+            f"**历史参考：** Top {len(results)} 相似案例中，"
+            f"{up_count} 个后续上涨、{len(returns) - up_count} 个下跌，"
+            f"平均后续涨跌 {color} **{avg_ret:+.1f}%**"
+        )
+        st.caption("⚠️ 历史走势不代表未来表现，仅供参考")
+
+    for i, case in enumerate(results, 1):
+        render_similar_case(case, i)

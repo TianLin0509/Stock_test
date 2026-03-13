@@ -10,3 +10,7 @@ __pycache__/
 # IDE
 .vscode/
 .idea/
+
+# Large data files
+data/history/
+*.parquet

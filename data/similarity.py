@@ -210,9 +210,9 @@ def find_similar(
     # ── 排除日期阈值 ──────────────────────────────────────────────────────
     if exclude_recent_days > 0:
         cutoff_date = pd.to_datetime(target_df["日期"].max()) - pd.Timedelta(days=exclude_recent_days)
-        cutoff_str = cutoff_date.strftime("%Y%m%d")
+        cutoff_val = float(cutoff_date.strftime("%Y%m%d"))
     else:
-        cutoff_str = "99999999"
+        cutoff_val = 99999999.0
 
     all_candidates = []
 
@@ -239,7 +239,7 @@ def find_similar(
 
         # 排除最近数据
         window_end_dates = dates[k_days - 1:]
-        date_mask = window_end_dates < cutoff_str
+        date_mask = window_end_dates < cutoff_val
 
         if not date_mask.any():
             continue
