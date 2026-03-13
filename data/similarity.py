@@ -8,16 +8,13 @@ import pandas as pd
 import os
 import streamlit as st
 
-HISTORY_FILE = os.path.join(os.path.dirname(__file__), "history", "all_daily.parquet")
+HISTORY_DIR = os.path.join(os.path.dirname(__file__), "history")
+# 兼容旧的单文件和新的拆分文件
+HISTORY_FILE = os.path.join(HISTORY_DIR, "all_daily.parquet")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 五维权重配置
 # ══════════════════════════════════════════════════════════════════════════════
-#   涨跌幅形态：整体走势方向和节奏（最重要）
-#   振幅：K线实体大小，区分大阳线/十字星/小阴线
-#   成交量节奏：放量/缩量的节奏
-#   上影线比例：上方抛压信号（长上影 = 卖压重）
-#   下影线比例：下方支撑信号（长下影 = 有承接）
 
 WEIGHTS = {
     "pct_chg":      0.35,   # 涨跌幅形态
@@ -30,12 +27,21 @@ WEIGHTS = {
 
 @st.cache_data(ttl=86400, show_spinner=False)
 def load_history() -> pd.DataFrame:
-    """加载全市场历史日线数据"""
-    if not os.path.exists(HISTORY_FILE):
-        return pd.DataFrame()
-    df = pd.read_parquet(HISTORY_FILE)
-    df = df.sort_values(["ts_code", "trade_date"]).reset_index(drop=True)
-    return df
+    """加载全市场历史日线数据（支持单文件或拆分文件）"""
+    # 优先：拆分的 part 文件（适合 GitHub 部署）
+    import glob
+    parts = sorted(glob.glob(os.path.join(HISTORY_DIR, "all_daily_part*.parquet")))
+    if parts:
+        dfs = [pd.read_parquet(p) for p in parts]
+        df = pd.concat(dfs, ignore_index=True)
+        df = df.sort_values(["ts_code", "trade_date"]).reset_index(drop=True)
+        return df
+    # 兜底：单个大文件（本地开发用）
+    if os.path.exists(HISTORY_FILE):
+        df = pd.read_parquet(HISTORY_FILE)
+        df = df.sort_values(["ts_code", "trade_date"]).reset_index(drop=True)
+        return df
+    return pd.DataFrame()
 
 
 # ══════════════════════════════════════════════════════════════════════════════

@@ -283,12 +283,13 @@ def _render_free_question(client, cfg, model_name, name, tscode, info, analyses)
 
 def _show_similarity_section(name: str, tscode: str):
     """独立的 K线匹配 tab"""
-    from data.similarity import find_similar, HISTORY_FILE
+    from data.similarity import find_similar, HISTORY_FILE, HISTORY_DIR
     from ui.charts import render_similar_case
-    import os
+    import os, glob
 
     # 历史数据文件不存在则跳过
-    if not os.path.exists(HISTORY_FILE):
+    has_parts = bool(glob.glob(os.path.join(HISTORY_DIR, "all_daily_part*.parquet")))
+    if not has_parts and not os.path.exists(HISTORY_FILE):
         st.warning("历史K线数据文件不存在，K线匹配功能不可用")
         return
 

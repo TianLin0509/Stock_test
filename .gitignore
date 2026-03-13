@@ -11,6 +11,5 @@ __pycache__/
 .vscode/
 .idea/
 
-# Large data files
-data/history/
-*.parquet
+# Large data files (单个大文件排除，拆分的 part 文件允许上传)
+data/history/all_daily.parquet
