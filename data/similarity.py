@@ -180,6 +180,7 @@ def find_similar(
     context_days: int = 10,
     exclude_code: str = "",
     exclude_recent_days: int = 60,
+    progress_callback=None,
 ) -> list[dict]:
     """
     全市场搜索与 target_df 最近 k_days 走势最相似的 Top N 案例
@@ -202,6 +203,14 @@ def find_similar(
     if history.empty:
         return []
 
+    # ── 加载股票名称映射 ────────────────────────────────────────────────
+    try:
+        from data.tushare_client import load_stock_list
+        sl, _ = load_stock_list()
+        name_map = dict(zip(sl["ts_code"], sl["name"])) if not sl.empty else {}
+    except Exception:
+        name_map = {}
+
     # ── 提取目标五维特征 ──────────────────────────────────────────────────
     target_feats = extract_features_from_target(target_df, k_days)
     if target_feats is None:
@@ -217,7 +226,11 @@ def find_similar(
     all_candidates = []
 
     # ── 按股票分组搜索 ────────────────────────────────────────────────────
-    for code, group in history.groupby("ts_code"):
+    groups = list(history.groupby("ts_code"))
+    total_stocks = len(groups)
+    for idx_stock, (code, group) in enumerate(groups):
+        if progress_callback and idx_stock % 50 == 0:
+            progress_callback(idx_stock, total_stocks)
         if code == exclude_code:
             continue
 
@@ -291,15 +304,31 @@ def find_similar(
             else:
                 detail[feat_name] = 0.0
 
+        # ── 聚合：K线匹配度 & 成交量匹配度 ─────────────────────────────
+        # K线匹配度 = 涨跌幅 + 振幅 + 上影线 + 下影线 的加权平均
+        kline_w = {"pct_chg": 0.35, "amplitude": 0.25, "upper_shadow": 0.20, "lower_shadow": 0.20}
+        kline_sim = sum(detail.get(k, 0) * w for k, w in kline_w.items())
+        # 成交量匹配度 = vol_chg 的相关性
+        vol_sim = detail.get("vol_chg", 0.0)
+
+        # 股票名称
+        stock_name = name_map.get(code, "")
+
         all_candidates.append({
             "ts_code":           code,
+            "stock_name":        stock_name,
             "similarity":        round(best_sim * 100, 1),
+            "kline_similarity":  round(kline_sim, 1),
+            "vol_similarity":    round(vol_sim, 1),
             "match_start_date":  grp.iloc[match_start]["trade_date"],
             "match_end_date":    grp.iloc[match_end]["trade_date"],
             "subsequent_return": round(subsequent_ret, 2) if subsequent_ret is not None else None,
             "context_df":        ctx_df,
             "feature_detail":    detail,
         })
+
+    if progress_callback:
+        progress_callback(total_stocks, total_stocks)
 
     # ── 排序取 Top N（去重：同一只股票只保留最佳）─────────────────────────
     all_candidates.sort(key=lambda x: x["similarity"], reverse=True)

@@ -282,46 +282,67 @@ def _render_free_question(client, cfg, model_name, name, tscode, info, analyses)
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _show_similarity_section(name: str, tscode: str):
-    """在 K线趋势 tab 下方展示历史相似走势匹配"""
+    """独立的 K线匹配 tab"""
     from data.similarity import find_similar, HISTORY_FILE
     from ui.charts import render_similar_case
     import os
 
     # 历史数据文件不存在则跳过
     if not os.path.exists(HISTORY_FILE):
+        st.warning("历史K线数据文件不存在，K线匹配功能不可用")
         return
 
     price_df = st.session_state.get("price_df", pd.DataFrame())
     if price_df.empty or len(price_df) < 5:
+        st.warning("K线数据不足，请先查询股票")
         return
 
     st.markdown("---")
     st.markdown(f"#### 📐 历史相似走势匹配 · {name}")
+
+    # 天数选择
+    col_opt1, col_opt2 = st.columns([1, 3])
+    with col_opt1:
+        k_days = st.selectbox(
+            "匹配天数", [5, 10, 15, 20, 30], index=1,
+            key="sim_k_days", help="选择用最近多少个交易日的K线进行匹配",
+        )
+
     st.caption(
-        "基于最近5个交易日的五维K线特征（涨跌幅 · 振幅 · 量能节奏 · 上影线 · 下影线），"
-        "在全市场5年历史数据中搜索最相似的走势，并展示匹配段前后各10天的完整走势供参考。"
+        f"基于最近 **{k_days}** 个交易日的五维K线特征（涨跌幅 · 振幅 · 量能节奏 · 上影线 · 下影线），"
+        f"在全市场5年历史数据中搜索最相似的走势，并展示匹配段前后各10天的完整走势供参考。"
     )
 
-    # 检查缓存
+    if len(price_df) < k_days:
+        st.warning(f"当前K线数据只有 {len(price_df)} 天，不足 {k_days} 天，请减小匹配天数")
+        return
+
+    # 检查缓存（需要 ts_code + k_days 一致）
     cached = st.session_state.get("similarity_results")
-    if cached and cached.get("ts_code") == tscode:
+    if cached and cached.get("ts_code") == tscode and cached.get("k_days") == k_days:
         _render_similarity_results(cached["results"])
         return
 
     if st.button("🔍 开始匹配历史走势", type="primary", key="btn_similarity"):
-        with st.status("📐 正在全市场搜索相似走势...", expanded=True) as status:
+        progress_bar = st.progress(0, text="准备中...")
+        status_container = st.status("📐 正在全市场搜索相似走势...", expanded=True)
+        with status_container as status:
             st.write("📊 加载全市场5年日线数据（首次较慢）...")
-            st.write("🔢 提取目标股票五维K线特征...")
-            st.write(f"🔍 在5400+只股票中逐一滑窗匹配...")
 
             results = find_similar(
                 target_df=price_df,
-                k_days=5,
+                k_days=k_days,
                 top_n=3,
                 context_days=10,
                 exclude_code=tscode,
                 exclude_recent_days=60,
+                progress_callback=lambda cur, total: progress_bar.progress(
+                    cur / total,
+                    text=f"🔍 搜索中... {cur}/{total} 只股票 ({cur*100//total}%)"
+                ),
             )
+
+            progress_bar.progress(1.0, text="✅ 搜索完成！")
 
             if results:
                 st.write(f"✅ 找到 {len(results)} 个高度相似的历史案例！")
@@ -333,6 +354,7 @@ def _show_similarity_section(name: str, tscode: str):
         # 缓存结果
         st.session_state["similarity_results"] = {
             "ts_code": tscode,
+            "k_days": k_days,
             "results": results,
         }
 
