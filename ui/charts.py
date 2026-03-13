@@ -125,7 +125,7 @@ def render_similar_case(case: dict, idx: int) -> None:
     ), row=1, col=1)
 
     # 匹配段背景高亮
-    match_dates = dates[match_mask]
+    match_dates = [d for d, m in zip(dates, match_mask) if m]
     if len(match_dates) >= 2:
         fig.add_vrect(
             x0=match_dates[0], x1=match_dates[-1],
