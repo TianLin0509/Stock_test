@@ -300,27 +300,33 @@ def _show_similarity_section(name: str, tscode: str):
     st.markdown("---")
     st.markdown(f"#### 📐 历史相似走势匹配 · {name}")
 
-    # 天数选择
-    col_opt1, col_opt2 = st.columns([1, 3])
+    # 参数选择
+    col_opt1, col_opt2, col_opt3 = st.columns([1, 1, 2])
     with col_opt1:
         k_days = st.selectbox(
             "匹配天数", [5, 10, 15, 20, 30], index=1,
             key="sim_k_days", help="选择用最近多少个交易日的K线进行匹配",
         )
+    with col_opt2:
+        top_n = st.selectbox(
+            "案例数", [1, 3, 5, 7], index=1,
+            key="sim_top_n", help="返回最相似的前N个案例",
+        )
 
     st.caption(
         f"基于最近 **{k_days}** 个交易日的五维K线特征（涨跌幅 · 振幅 · 量能节奏 · 上影线 · 下影线），"
-        f"在全市场5年历史数据中搜索最相似的走势，并展示匹配段前后各10天的完整走势供参考。"
+        f"在全市场5年历史数据中搜索最相似的 Top {top_n} 走势，并展示匹配段前后各10天的完整走势供对比。"
     )
 
     if len(price_df) < k_days:
         st.warning(f"当前K线数据只有 {len(price_df)} 天，不足 {k_days} 天，请减小匹配天数")
         return
 
-    # 检查缓存（需要 ts_code + k_days 一致）
+    # 检查缓存（需要 ts_code + k_days + top_n 一致）
     cached = st.session_state.get("similarity_results")
-    if cached and cached.get("ts_code") == tscode and cached.get("k_days") == k_days:
-        _render_similarity_results(cached["results"])
+    if (cached and cached.get("ts_code") == tscode
+            and cached.get("k_days") == k_days and cached.get("top_n") == top_n):
+        _render_similarity_results(cached["results"], price_df, k_days)
         return
 
     if st.button("🔍 开始匹配历史走势", type="primary", key="btn_similarity"):
@@ -332,7 +338,7 @@ def _show_similarity_section(name: str, tscode: str):
             results = find_similar(
                 target_df=price_df,
                 k_days=k_days,
-                top_n=3,
+                top_n=top_n,
                 context_days=10,
                 exclude_code=tscode,
                 exclude_recent_days=60,
@@ -355,14 +361,16 @@ def _show_similarity_section(name: str, tscode: str):
         st.session_state["similarity_results"] = {
             "ts_code": tscode,
             "k_days": k_days,
+            "top_n": top_n,
             "results": results,
         }
 
         if results:
-            _render_similarity_results(results)
+            _render_similarity_results(results, price_df, k_days)
 
 
-def _render_similarity_results(results: list):
+def _render_similarity_results(results: list, target_df: pd.DataFrame = None,
+                               k_days: int = 10):
     """渲染相似走势匹配结果"""
     from ui.charts import render_similar_case
 
@@ -375,13 +383,16 @@ def _render_similarity_results(results: list):
     if returns:
         avg_ret = sum(returns) / len(returns)
         up_count = sum(1 for r in returns if r > 0)
-        color = "🟢" if avg_ret > 0 else "🔴"
+        color = "🔴" if avg_ret > 0 else "🟢"
         st.markdown(
             f"**历史参考：** Top {len(results)} 相似案例中，"
             f"{up_count} 个后续上涨、{len(returns) - up_count} 个下跌，"
             f"平均后续涨跌 {color} **{avg_ret:+.1f}%**"
         )
         st.caption("⚠️ 历史走势不代表未来表现，仅供参考")
+        if target_df is not None:
+            target_name = st.session_state.get("stock_name", "目标股")
+            st.caption(f"📊 蓝色叠加K线为 **{target_name}** 最近 {k_days} 天走势，用于直观对比")
 
     for i, case in enumerate(results, 1):
-        render_similar_case(case, i)
+        render_similar_case(case, i, target_df=target_df, k_days=k_days)
