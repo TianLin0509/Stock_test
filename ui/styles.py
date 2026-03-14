@@ -61,9 +61,9 @@ def inject_css():
 
 /* ═══════════════════════════════════════════════════════════════
    搜索行：输入框 + 一键分析 + 重置（同一行，统一风格）
-   用 :has(.stTextInput) 精确锁定，不影响其他按钮行
+   用 :has(.stTextInput, .stSelectbox) 精确锁定，不影响其他按钮行
    ═══════════════════════════════════════════════════════════════ */
-[data-testid="stHorizontalBlock"]:has(.stTextInput) {
+[data-testid="stHorizontalBlock"]:has(.stTextInput, .stSelectbox) {
   background: transparent !important;
   border: none !important;
   box-shadow: none !important;
@@ -72,12 +72,28 @@ def inject_css():
   width: 100% !important;
   border-radius: 0 !important;
   align-items: flex-end !important;
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  gap: 8px !important;
 }
-[data-testid="stHorizontalBlock"]:has(.stTextInput)::before {
+/* 桌面端搜索行 flex 比例 */
+[data-testid="stHorizontalBlock"]:has(.stTextInput, .stSelectbox) > div:first-child {
+  flex: 4 1 0 !important;
+  min-width: 0 !important;
+}
+[data-testid="stHorizontalBlock"]:has(.stTextInput, .stSelectbox) > div:nth-child(2) {
+  flex: 1.5 1 0 !important;
+  min-width: 0 !important;
+}
+[data-testid="stHorizontalBlock"]:has(.stTextInput, .stSelectbox) > div:nth-child(3) {
+  flex: 1 1 0 !important;
+  min-width: 0 !important;
+}
+[data-testid="stHorizontalBlock"]:has(.stTextInput, .stSelectbox)::before {
   display: none !important;
 }
 /* 搜索行按钮：与输入框统一的 border 风格 */
-[data-testid="stHorizontalBlock"]:has(.stTextInput) .stButton button {
+[data-testid="stHorizontalBlock"]:has(.stTextInput, .stSelectbox) .stButton button {
   border-radius: 50px !important;
   border: 2px solid var(--border) !important;
   background: var(--bg-card) !important;
@@ -91,14 +107,14 @@ def inject_css():
   transition: all 0.2s ease !important;
 }
 /* 桌面悬浮 */
-[data-testid="stHorizontalBlock"]:has(.stTextInput) .stButton button:hover {
+[data-testid="stHorizontalBlock"]:has(.stTextInput, .stSelectbox) .stButton button:hover {
   border-color: var(--blue) !important;
   color: var(--blue) !important;
   box-shadow: 0 0 0 3px rgba(99,102,241,0.10) !important;
   transform: translateY(-1px) !important;
 }
 /* 触摸按下（桌面+手机通用） */
-[data-testid="stHorizontalBlock"]:has(.stTextInput) .stButton button:active {
+[data-testid="stHorizontalBlock"]:has(.stTextInput, .stSelectbox) .stButton button:active {
   transform: scale(0.97) !important;
   border-color: var(--blue) !important;
   color: var(--blue) !important;
@@ -277,9 +293,9 @@ html, body, [data-testid="stAppViewContainer"] {
 
 /* ═══════════════════════════════════════════════════════════════
    操作按钮行（预期差/趋势/基本面）
-   用 :not(:has(.stTextInput)) 排除搜索行，避免选择器冲突
+   用 :not(:has(.stTextInput, .stSelectbox)) 排除搜索行，避免选择器冲突
    ═══════════════════════════════════════════════════════════════ */
-[data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextInput)) {
+[data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextInput, .stSelectbox)) {
   background: var(--bg-card) !important;
   border: 1px solid var(--border) !important;
   border-radius: 50px !important;
@@ -291,7 +307,7 @@ html, body, [data-testid="stAppViewContainer"] {
   position: relative;
 }
 /* 左侧小竖线 */
-[data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextInput))::before {
+[data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextInput, .stSelectbox))::before {
   content: "";
   position: absolute;
   left: -6px; top: 25%; height: 50%; width: 2px;
@@ -299,7 +315,7 @@ html, body, [data-testid="stAppViewContainer"] {
   background: linear-gradient(180deg, var(--blue), var(--purple));
   opacity: 0.45;
 }
-[data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextInput)) .stButton button {
+[data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextInput, .stSelectbox)) .stButton button {
   border-radius: 50px !important;
   font-family: 'Nunito', sans-serif !important;
   font-weight: 600 !important;
@@ -310,26 +326,26 @@ html, body, [data-testid="stAppViewContainer"] {
   transition: all 0.15s ease !important;
 }
 /* 悬浮效果 */
-[data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextInput)) .stButton button:hover {
+[data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextInput, .stSelectbox)) .stButton button:hover {
   transform: scale(1.05) !important;
   z-index: 2 !important;
   position: relative !important;
 }
-[data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextInput)) .stButton button:not([kind="primary"]) {
+[data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextInput, .stSelectbox)) .stButton button:not([kind="primary"]) {
   background: transparent !important;
   border: none !important;
   color: var(--text-mid) !important;
   box-shadow: none !important;
 }
-[data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextInput)) .stButton button:not([kind="primary"]):hover {
+[data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextInput, .stSelectbox)) .stButton button:not([kind="primary"]):hover {
   background: var(--bg-soft) !important;
   color: var(--blue) !important;
   box-shadow: 0 2px 8px rgba(99,102,241,0.15) !important;
 }
-[data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextInput)) .stButton button[kind="primary"] {
+[data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextInput, .stSelectbox)) .stButton button[kind="primary"] {
   box-shadow: 0 2px 8px rgba(99,102,241,0.25) !important;
 }
-[data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextInput)) .stButton button[kind="primary"]:hover {
+[data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextInput, .stSelectbox)) .stButton button[kind="primary"]:hover {
   box-shadow: 0 4px 14px rgba(99,102,241,0.4) !important;
 }
 
@@ -431,7 +447,7 @@ hr { border-color: var(--border) !important; margin: 1rem 0 !important; }
   /* ══════════════════════════════════════════════════════════
      搜索行：手机端保持三元素同行，不堆叠
      ══════════════════════════════════════════════════════════ */
-  [data-testid="stHorizontalBlock"]:has(.stTextInput) {
+  [data-testid="stHorizontalBlock"]:has(.stTextInput, .stSelectbox) {
     display: flex !important;
     flex-direction: row !important;
     flex-wrap: nowrap !important;
@@ -439,17 +455,17 @@ hr { border-color: var(--border) !important; margin: 1rem 0 !important; }
     gap: 6px !important;
   }
   /* 输入框与按钮比例：给按钮更多空间，文字不拥挤 */
-  [data-testid="stHorizontalBlock"]:has(.stTextInput) > div:first-child {
+  [data-testid="stHorizontalBlock"]:has(.stTextInput, .stSelectbox) > div:first-child {
     flex: 2.5 1 0 !important;
     min-width: 0 !important;
     width: 0 !important;
   }
-  [data-testid="stHorizontalBlock"]:has(.stTextInput) > div:nth-child(2) {
+  [data-testid="stHorizontalBlock"]:has(.stTextInput, .stSelectbox) > div:nth-child(2) {
     flex: 1.8 1 0 !important;
     min-width: 0 !important;
     width: 0 !important;
   }
-  [data-testid="stHorizontalBlock"]:has(.stTextInput) > div:nth-child(3) {
+  [data-testid="stHorizontalBlock"]:has(.stTextInput, .stSelectbox) > div:nth-child(3) {
     flex: 1 1 0 !important;
     min-width: 0 !important;
     width: 0 !important;
@@ -460,7 +476,7 @@ hr { border-color: var(--border) !important; margin: 1rem 0 !important; }
     border-radius: 12px !important;
   }
   /* 搜索行按钮手机适配 */
-  [data-testid="stHorizontalBlock"]:has(.stTextInput) .stButton button {
+  [data-testid="stHorizontalBlock"]:has(.stTextInput, .stSelectbox) .stButton button {
     border-radius: 12px !important;
     min-height: 42px !important;
     font-size: 0.78rem !important;
@@ -469,7 +485,7 @@ hr { border-color: var(--border) !important; margin: 1rem 0 !important; }
     -webkit-tap-highlight-color: transparent !important;
   }
   /* 手机触摸：模拟桌面 hover 的蓝色边框特效 */
-  [data-testid="stHorizontalBlock"]:has(.stTextInput) .stButton button:active {
+  [data-testid="stHorizontalBlock"]:has(.stTextInput, .stSelectbox) .stButton button:active {
     border-color: var(--blue) !important;
     color: var(--blue) !important;
     box-shadow: 0 0 0 3px rgba(99,102,241,0.15) !important;
@@ -600,7 +616,7 @@ hr { border-color: var(--border) !important; margin: 1rem 0 !important; }
   }
 
   /* ── 操作按钮行（预期差/趋势/基本面）：手机横排 ── */
-  [data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextInput)) {
+  [data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextInput, .stSelectbox)) {
     display: flex !important;
     flex-direction: row !important;
     flex-wrap: nowrap !important;
@@ -612,19 +628,19 @@ hr { border-color: var(--border) !important; margin: 1rem 0 !important; }
     margin-left: 0 !important;
     border: 1px solid var(--border) !important;
   }
-  [data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextInput))::before {
+  [data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextInput, .stSelectbox))::before {
     display: none !important;
   }
-  [data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextInput))::-webkit-scrollbar {
+  [data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextInput, .stSelectbox))::-webkit-scrollbar {
     display: none;
   }
-  [data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextInput)) > div[data-testid="column"],
-  [data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextInput)) > div {
+  [data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextInput, .stSelectbox)) > div[data-testid="column"],
+  [data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextInput, .stSelectbox)) > div {
     flex: 1 1 0 !important;
     min-width: 0 !important;
     width: 0 !important;
   }
-  [data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextInput)) .stButton button {
+  [data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextInput, .stSelectbox)) .stButton button {
     font-size: 0.72rem !important;
     padding: 6px 4px !important;
     border-radius: 50px !important;
@@ -634,7 +650,7 @@ hr { border-color: var(--border) !important; margin: 1rem 0 !important; }
     min-height: 36px !important;
   }
   /* 手机端触摸反馈：缩放而非放大（不溢出） */
-  [data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextInput)) .stButton button:active {
+  [data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextInput, .stSelectbox)) .stButton button:active {
     transform: scale(0.95) !important;
     background: var(--bg-soft) !important;
   }
@@ -728,12 +744,12 @@ hr { border-color: var(--border) !important; margin: 1rem 0 !important; }
     min-width: 100% !important;
   }
   /* 操作按钮行更紧凑 */
-  [data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextInput)) .stButton button {
+  [data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextInput, .stSelectbox)) .stButton button {
     font-size: 0.65rem !important;
     padding: 4px 2px !important;
   }
   /* 搜索行按钮更紧凑 */
-  [data-testid="stHorizontalBlock"]:has(.stTextInput) .stButton button {
+  [data-testid="stHorizontalBlock"]:has(.stTextInput, .stSelectbox) .stButton button {
     font-size: 0.72rem !important;
     padding: 0.35rem 0.4rem !important;
     min-height: 38px !important;
