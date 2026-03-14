@@ -212,7 +212,7 @@ def resolve_stock(query: str) -> tuple[str, str, str | None]:
 
     if not df.empty:
         if re.match(r"^\d{6}$", query):
-            m = df[df["symbol"] == query]
+            m = df[df["symbol"].astype(str) == query]
             if not m.empty:
                 return m.iloc[0]["ts_code"], m.iloc[0]["name"], None
             return to_ts_code(query), query, None
@@ -221,7 +221,7 @@ def resolve_stock(query: str) -> tuple[str, str, str | None]:
         if not m.empty:
             return m.iloc[0]["ts_code"], m.iloc[0]["name"], None
 
-        m = df[df["symbol"].str.contains(query, na=False)]
+        m = df[df["symbol"].astype(str).str.contains(query, na=False)]
         if not m.empty:
             return m.iloc[0]["ts_code"], m.iloc[0]["name"], None
 

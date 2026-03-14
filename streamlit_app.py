@@ -480,8 +480,13 @@ def main():
     # ══════════════════════════════════════════════════════════════════════
     def _resolve_and_fetch(q: str):
         """解析股票 + 获取最少通用数据（info/K线/财务/估值），立即返回以启动分析"""
-        # selectbox 选中值格式为 "600547 航天发展"，提取代码部分
-        q = q.strip().split()[0] if q and " " in q.strip() else q.strip()
+        # selectbox 选中值格式为 "600547 航天发展"，提取名称或6位代码
+        q = q.strip()
+        if " " in q:
+            parts = q.split(None, 1)  # ["600547", "航天发展"]
+            code_part, name_part = parts[0], parts[1] if len(parts) > 1 else ""
+            # 优先用6位代码，否则用名称
+            q = code_part if len(code_part) == 6 and code_part.isdigit() else name_part or code_part
         _save_analysis_to_history()
         for k in ["analyses", "moe_results", "stock_fin",
                    "valuation_df",
