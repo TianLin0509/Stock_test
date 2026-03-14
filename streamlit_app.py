@@ -555,27 +555,34 @@ def main():
         # Col 0: 🚀 一键分析
         with _action_cols[0]:
             _btn_type_all = "primary" if active_view == "overview" else "secondary"
-            if core_all_started:
+            _any_core_running = any(is_running(st.session_state, k) for k in core_keys)
+            if _any_core_running:
+                # 分析进行中 → 禁用按钮
+                st.button("⏳ 分析中…", type=_btn_type_all, disabled=True,
+                          use_container_width=True, key="btn_all")
+            elif core_all_started:
                 if st.button("✅ 一键分析", type=_btn_type_all,
                              use_container_width=True, key="btn_all"):
                     st.session_state["active_view"] = "overview"
                     need_rerun = True
             else:
                 if st.button("🚀 一键分析", type=_btn_type_all,
-                             use_container_width=True, key="btn_all",
-                             disabled=not query):
-                    _last_q = st.session_state.get("_last_query", "")
-                    if not stock_ready or query != _last_q:
-                        _resolve_and_fetch(query)
-                        st.session_state["_last_query"] = query
-                        stock_ready = True
-                    if client:
-                        for key in core_keys:
-                            if not analyses.get(key) and not is_running(st.session_state, key):
-                                start_analysis(st.session_state, key, client, cfg_now,
-                                               selected_model)
-                    st.session_state["active_view"] = "overview"
-                    need_rerun = True
+                             use_container_width=True, key="btn_all"):
+                    if not query:
+                        st.toast("请先输入股票代码或名称")
+                    else:
+                        _last_q = st.session_state.get("_last_query", "")
+                        if not stock_ready or query != _last_q:
+                            _resolve_and_fetch(query)
+                            st.session_state["_last_query"] = query
+                            stock_ready = True
+                        if client:
+                            for key in core_keys:
+                                if not analyses.get(key) and not is_running(st.session_state, key):
+                                    start_analysis(st.session_state, key, client, cfg_now,
+                                                   selected_model)
+                        st.session_state["active_view"] = "overview"
+                        need_rerun = True
 
         # Col 1-3: 核心三项按钮（同时充当标签页切换）
         _view_map = [
@@ -658,7 +665,8 @@ def main():
                 if analyses.get(k):
                     _status_parts.append(f"✅ {_name_map[k]}")
                 elif is_running(st.session_state, k):
-                    _status_parts.append(f"⏳ {_name_map[k]}…")
+                    _liner = _job_one_liner(k)
+                    _status_parts.append(f"⏳ {_name_map[k]}: {_liner}")
                 else:
                     _status_parts.append(f"⬜ {_name_map[k]}")
             _status_line = " &nbsp;|&nbsp; ".join(_status_parts)
@@ -671,7 +679,8 @@ def main():
                     if analyses.get(dk):
                         _deep_parts.append(f"✅ {_deep_map[dk]}")
                     elif is_running(st.session_state, dk):
-                        _deep_parts.append(f"⏳ {_deep_map[dk]}…")
+                        _liner = _job_one_liner(dk)
+                        _deep_parts.append(f"⏳ {_deep_map[dk]}: {_liner}")
                 _deep_line = " &nbsp;|&nbsp; ".join(_deep_parts)
                 if _deep_line:
                     _status_line += f" &nbsp;&nbsp;🔬 深度: {_deep_line}"
@@ -735,16 +744,6 @@ def main():
                     st.markdown(f"""<div class="status-banner warn">
   ⚠️ <strong>AI 模型暂不可用</strong>：{ai_err}，请在左侧切换其他模型。
 </div>""", unsafe_allow_html=True)
-
-                # overview 中显示各模块一句话实时进度（分析中时）
-                _any_core_running = any(is_running(st.session_state, k) for k in core_keys)
-                if _any_core_running:
-                    for k in core_keys:
-                        if is_running(st.session_state, k):
-                            _liner = _job_one_liner(k)
-                            st.caption(f"⏳ **{_name_map[k]}**: {_liner}")
-                        elif analyses.get(k):
-                            st.caption(f"✅ **{_name_map[k]}**: 分析完成，点击上方按钮查看详情")
 
                 # 价值投机雷达（核心三项完成后）
                 if core_all_done:
