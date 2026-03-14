@@ -571,6 +571,7 @@ def main():
     if _auto_search and _top10_pick:
         _resolve_and_fetch(_top10_pick)
         st.session_state["_last_query"] = _top10_pick
+        st.rerun()
 
     # ══════════════════════════════════════════════════════════════════════
     # 获取 AI 客户端（各 Tab 共用）
@@ -592,7 +593,6 @@ def main():
 
         # ── 操作栏：5 按钮（一键分析 / 预期差 / 趋势 / 基本面 / 深度分析）──
         _action_cols = st.columns([1.5, 1, 1, 1, 1.2])
-        need_rerun = False
 
         core_all_done = stock_ready and all(
             analyses.get(k) for k in core_keys
@@ -623,7 +623,8 @@ def main():
                         st.toast("请先输入股票代码或名称")
                     else:
                         _last_q = st.session_state.get("_last_query", "")
-                        if not stock_ready or query != _last_q:
+                        _need_fetch = not stock_ready or query != _last_q
+                        if _need_fetch:
                             _resolve_and_fetch(query)
                             st.session_state["_last_query"] = query
                             stock_ready = True
@@ -633,7 +634,7 @@ def main():
                                     start_analysis(st.session_state, key, client, cfg_now,
                                                    selected_model)
                         st.session_state["active_view"] = "overview"
-                        need_rerun = True
+                        st.rerun()  # 立刻 rerun，避免 status widget 残留
 
         # Col 1-3: 核心三项按钮（同时充当标签页切换）
         _view_map = [
@@ -668,7 +669,7 @@ def main():
                         if client and stock_ready:
                             start_analysis(st.session_state, key, client, cfg_now,
                                            selected_model)
-                    need_rerun = True
+                    st.rerun()
 
         # Col 4: 🔬 深度分析
         with _action_cols[4]:
@@ -691,12 +692,7 @@ def main():
                                 start_analysis(st.session_state, dk, client, cfg_now,
                                                selected_model)
                         st.session_state["_auto_sim"] = True
-                    need_rerun = True
-
-        if need_rerun:
-            if stock_ready:
-                st.session_state["_upper_collapsed"] = True
-            st.rerun()
+                    st.rerun()
 
         # ── 紧凑状态栏 ──────────────────────────────────────────
         active_view = st.session_state.get("active_view", "overview")
