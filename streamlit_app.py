@@ -507,7 +507,7 @@ def main():
         if _top10_pick:
             st.session_state["query_input"] = _top10_pick
 
-        _search_col, _go_col, _reset_col = st.columns([4, 2, 1.5])
+        _search_col, _go_col, _reset_col = st.columns([3, 2, 1.2])
         with _search_col:
             query = st.text_input(
                 "搜索股票", label_visibility="collapsed",

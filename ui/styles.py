@@ -438,14 +438,18 @@ hr { border-color: var(--border) !important; margin: 1rem 0 !important; }
     align-items: flex-end !important;
     gap: 6px !important;
   }
-  /* 输入框占更多空间 */
+  /* 输入框与按钮比例：给按钮更多空间，文字不拥挤 */
   [data-testid="stHorizontalBlock"]:has(.stTextInput) > div:first-child {
-    flex: 3 1 0 !important;
+    flex: 2.5 1 0 !important;
     min-width: 0 !important;
     width: 0 !important;
   }
-  /* 按钮列等分剩余空间 */
-  [data-testid="stHorizontalBlock"]:has(.stTextInput) > div:not(:first-child) {
+  [data-testid="stHorizontalBlock"]:has(.stTextInput) > div:nth-child(2) {
+    flex: 1.8 1 0 !important;
+    min-width: 0 !important;
+    width: 0 !important;
+  }
+  [data-testid="stHorizontalBlock"]:has(.stTextInput) > div:nth-child(3) {
     flex: 1 1 0 !important;
     min-width: 0 !important;
     width: 0 !important;
@@ -462,6 +466,15 @@ hr { border-color: var(--border) !important; margin: 1rem 0 !important; }
     font-size: 0.78rem !important;
     padding: 0.4rem 0.5rem !important;
     border-width: 1.5px !important;
+    -webkit-tap-highlight-color: transparent !important;
+  }
+  /* 手机触摸：模拟桌面 hover 的蓝色边框特效 */
+  [data-testid="stHorizontalBlock"]:has(.stTextInput) .stButton button:active {
+    border-color: var(--blue) !important;
+    color: var(--blue) !important;
+    box-shadow: 0 0 0 3px rgba(99,102,241,0.15) !important;
+    background: var(--blue-lt) !important;
+    transform: scale(0.97) !important;
   }
 
   /* ── 通用按钮手机适配 ── */
