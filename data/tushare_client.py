@@ -1,11 +1,14 @@
 """数据层 — Tushare 优先，akshare 备用，东方财富保底"""
 
+import logging
 import streamlit as st
 import pandas as pd
 import tushare as ts
 import re
 import os
 from datetime import datetime, timedelta
+
+logger = logging.getLogger(__name__)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -103,12 +106,13 @@ def ndays_ago(n: int) -> str:
 
 def _retry_call(fn, retries=3, delay=1):
     import time as _time
+    import random
     for attempt in range(1, retries + 1):
         try:
             return fn()
         except Exception as e:
             if attempt < retries:
-                _time.sleep(delay)
+                _time.sleep(delay + random.uniform(0, delay * 0.3))
                 delay *= 2
             else:
                 raise
@@ -129,8 +133,8 @@ def _try_with_fallback(tushare_fn, akshare_fn, eastmoney_fn=None, label="数据"
             if err is None:
                 _data_source = "tushare"
                 return result, None
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("[%s] tushare 失败: %s", label, e)
 
     # 第二层：akshare
     if akshare_fn is not None:
@@ -139,8 +143,8 @@ def _try_with_fallback(tushare_fn, akshare_fn, eastmoney_fn=None, label="数据"
             if err is None:
                 _data_source = "akshare"
                 return result, None
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("[%s] akshare 失败: %s", label, e)
 
     # 第三层：东方财富
     if eastmoney_fn is not None:
@@ -149,8 +153,8 @@ def _try_with_fallback(tushare_fn, akshare_fn, eastmoney_fn=None, label="数据"
             if err is None:
                 _data_source = "eastmoney"
                 return result, None
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("[%s] eastmoney 失败: %s", label, e)
 
     _data_source = "unavailable"
     return (pd.DataFrame() if label == "K线" else ({} if label == "基本信息" else "")), \
@@ -174,8 +178,8 @@ def load_stock_list() -> tuple[pd.DataFrame, str | None]:
                 if col not in df.columns:
                     df[col] = ""
             return df, None
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("[load_stock_list] CSV 读取失败: %s", e)
 
     if _pro is not None:
         try:
@@ -188,8 +192,8 @@ def load_stock_list() -> tuple[pd.DataFrame, str | None]:
             )
             if df is not None and not df.empty:
                 return df, None
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("[load_stock_list] tushare 失败: %s", e)
 
     # akshare 兜底
     from data.fallback import ak_get_stock_list
@@ -438,8 +442,8 @@ def get_valuation_history(ts_code: str, years: int = 5) -> tuple[pd.DataFrame, s
                         df[col] = pd.to_numeric(df[col], errors="coerce")
                 df = df.tail(years * 250).reset_index(drop=True)
                 return df, None
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("[get_valuation_history] akshare 失败: %s", e)
         return pd.DataFrame(), "akshare 无历史估值数据"
 
     return _try_with_fallback(_tushare, _akshare, None, label="历史估值")
@@ -476,8 +480,8 @@ def get_northbound_flow(ts_code: str) -> tuple[str, str | None]:
             if df is not None and not df.empty:
                 df = df.tail(20)
                 return f"北向资金持仓（近20日）：\n{df.to_string(index=False)}", None
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("[get_northbound_flow] akshare 失败: %s", e)
         return "北向资金数据暂不可用", None
 
     return _try_with_fallback(_tushare, _akshare, None, label="北向资金")
@@ -514,8 +518,8 @@ def get_margin_trading(ts_code: str) -> tuple[str, str | None]:
             if df is not None and not df.empty:
                 df = df.tail(15)
                 return f"融资融券（近15日）：\n{df.to_string(index=False)}", None
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("[get_margin_trading] akshare 失败: %s", e)
         return "融资融券数据暂不可用", None
 
     return _try_with_fallback(_tushare, _akshare, None, label="融资融券")
@@ -559,8 +563,8 @@ def get_sector_peers(ts_code: str) -> tuple[str, str | None]:
                 df_val = df_val.sort_values("total_mv", ascending=False)
                 return (f"行业：{industry}\n同行业个股估值对比（按市值排序）：\n"
                         f"{df_val.to_string(index=False)}"), None
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("[get_sector_peers] 同行估值获取失败: %s", e)
 
     # 兜底：只返回名称列表
     names = peers["name"].tolist()[:10]

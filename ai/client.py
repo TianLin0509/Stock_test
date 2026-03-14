@@ -1,9 +1,12 @@
 """AI 客户端 — 多 Provider 统一调用层"""
 
+import logging
 import threading
 from openai import OpenAI, APIConnectionError, AuthenticationError, RateLimitError
 from config import MODEL_CONFIGS
 from ai.doubao import doubao_call, doubao_stream
+
+logger = logging.getLogger(__name__)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -26,8 +29,8 @@ def add_tokens(prompt_tokens: int = 0, completion_tokens: int = 0,
         try:
             from utils.user_store import add_user_tokens
             add_user_tokens(username, prompt_tokens, completion_tokens, effective_total)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("[add_tokens] 用户token持久化失败: %s", e)
 
 
 def get_token_usage() -> dict:

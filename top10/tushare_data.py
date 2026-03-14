@@ -1,50 +1,21 @@
 """Tushare 数据增强 — 批量获取 PE/PB/市值/行业/K线摘要"""
 
+import logging
 import pandas as pd
 import streamlit as st
-import tushare as ts
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from data.tushare_client import (
+    get_pro, get_ts_error, to_ts_code,
+    today as _today, ndays_ago as _ndays_ago,
+    _retry_call as _retry,
+)
 
+logger = logging.getLogger(__name__)
 
-# ══════════════════════════════════════════════════════════════════════════════
-# INIT（复用 Stock_test 的配置方式）
-# ══════════════════════════════════════════════════════════════════════════════
-
-TUSHARE_TOKEN = st.secrets.get("TUSHARE_TOKEN", "")
-TUSHARE_URL = st.secrets.get("TUSHARE_URL", "http://lianghua.nanyangqiankun.top")
-
-
-def _init_tushare():
-    try:
-        import time as _time
-        import requests as _req
-
-        ts.set_token(TUSHARE_TOKEN)
-        p = ts.pro_api(TUSHARE_TOKEN)
-        p._DataApi__token = TUSHARE_TOKEN
-        p._DataApi__http_url = TUSHARE_URL
-
-        _orig_post = _req.post
-        def _patched_post(*a, **kw):
-            kw.setdefault("timeout", 30)
-            return _orig_post(*a, **kw)
-        _req.post = _patched_post
-
-        for attempt in range(1, 4):
-            try:
-                test = p.trade_cal(exchange="SSE", start_date="20240101", end_date="20240103")
-                if test is not None and not test.empty:
-                    return p, None
-            except Exception:
-                if attempt < 3:
-                    _time.sleep(2)
-        return None, "Tushare 连接失败"
-    except Exception as e:
-        return None, f"Tushare 初始化失败：{e}"
-
-
-_pro, _ts_err = _init_tushare()
+# 复用 data.tushare_client 已初始化的 Tushare 实例（避免重复初始化）
+_pro = get_pro()
+_ts_err = get_ts_error()
 
 
 def ts_ok() -> bool:
@@ -53,42 +24,6 @@ def ts_ok() -> bool:
 
 def get_ts_status() -> str:
     return "Tushare 可用" if _pro else (_ts_err or "不可用")
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# 工具函数
-# ══════════════════════════════════════════════════════════════════════════════
-
-def to_ts_code(code6: str) -> str:
-    code6 = code6.strip()
-    if "." in code6:
-        return code6.upper()
-    if code6.startswith("6"):
-        return f"{code6}.SH"
-    if code6.startswith(("4", "8")):
-        return f"{code6}.BJ"
-    return f"{code6}.SZ"
-
-
-def _today() -> str:
-    return datetime.now().strftime("%Y%m%d")
-
-
-def _ndays_ago(n: int) -> str:
-    return (datetime.now() - timedelta(days=n)).strftime("%Y%m%d")
-
-
-def _retry(fn, retries=3, delay=1):
-    import time as _time
-    for attempt in range(1, retries + 1):
-        try:
-            return fn()
-        except Exception as e:
-            if attempt < retries:
-                _time.sleep(delay)
-                delay *= 2
-            else:
-                raise
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -107,8 +42,8 @@ def _get_stock_industry() -> dict:
         ))
         if df is not None and not df.empty:
             return dict(zip(df["symbol"], df["industry"]))
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("[_get_stock_industry] %s", e)
     return {}
 
 
@@ -128,7 +63,8 @@ def _get_daily_basic_batch() -> pd.DataFrame:
             if df is not None and not df.empty:
                 df["code6"] = df["ts_code"].str.split(".").str[0]
                 return df
-        except Exception:
+        except Exception as e:
+            logger.debug("[_get_daily_basic_batch] offset=%d: %s", offset, e)
             continue
     return pd.DataFrame()
 
@@ -145,7 +81,8 @@ def _get_daily_batch() -> tuple[pd.DataFrame, str]:
             if df is not None and not df.empty:
                 df["code6"] = df["ts_code"].str.split(".").str[0]
                 return df, trade_date
-        except Exception:
+        except Exception as e:
+            logger.debug("[_get_daily_batch] offset=%d: %s", offset, e)
             continue
     return pd.DataFrame(), ""
 
@@ -161,8 +98,8 @@ def _get_stock_names() -> dict:
         ))
         if df is not None and not df.empty:
             return dict(zip(df["symbol"], df["name"]))
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("[_get_stock_names] %s", e)
     return {}
 
 
@@ -262,7 +199,8 @@ def _get_kline_data(code6: str) -> pd.DataFrame:
             "pct_chg": "涨跌幅", "amount": "成交额",
         })
         return df
-    except Exception:
+    except Exception as e:
+        logger.debug("[_get_kline_data] %s: %s", code6, e)
         return pd.DataFrame()
 
 
@@ -372,7 +310,8 @@ def enrich_candidates(df: pd.DataFrame, progress_callback=None) -> pd.DataFrame:
                     }
                 else:
                     kline_results[code] = {"summary": "", "technicals": {}}
-            except Exception:
+            except Exception as e:
+                logger.debug("[enrich_candidates] K线获取失败 %s: %s", code, e)
                 kline_results[code] = {"summary": "", "technicals": {}}
 
     enriched["K线摘要"] = enriched["代码"].map(
@@ -438,7 +377,8 @@ def _get_industry_benchmarks(basic_df: pd.DataFrame = None) -> dict:
                     "pb_mean": round(float(pb_vals.median()), 2) if len(pb_vals) >= 5 else None,
                 }
         return result
-    except Exception:
+    except Exception as e:
+        logger.debug("[_get_industry_benchmarks] %s", e)
         return {}
 
 
@@ -482,6 +422,6 @@ def get_sector_rotation() -> dict:
                     name = row.get("板块名称", "")
                     chg = row.get("涨跌幅", 0)
                     result["行业板块"].append(f"{name}({chg:+.2f}%)")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("[get_sector_rotation] %s", e)
     return result

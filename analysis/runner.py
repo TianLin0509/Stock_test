@@ -1,7 +1,8 @@
 """后台分析任务调度 — 支持多个分析并发执行，不阻塞 UI"""
 
-import time
+import logging
 import threading
+import pandas as pd
 from ai.client import call_ai
 from ai.context import build_analysis_context
 from ai.prompts import (
@@ -13,6 +14,8 @@ from ai.prompts import (
     build_holders_prompt,
 )
 from data.tushare_client import price_summary, to_code6
+
+logger = logging.getLogger(__name__)
 
 
 def _new_job() -> dict:
@@ -46,6 +49,12 @@ def any_running(session_state) -> bool:
     return any(j.get("status") == "running" for j in jobs.values())
 
 
+def _build_trend(name, tscode, df, cap, dragon, northbound, margin):
+    """趋势分析专用：先算价格摘要再构建 prompt"""
+    psmry = price_summary(df)
+    return build_trend_prompt(name, tscode, psmry, cap, dragon, northbound, margin)
+
+
 def start_analysis(session_state, key: str, client, cfg, model_name: str):
     """启动后台分析（如果尚未运行）"""
     jobs = get_jobs(session_state)
@@ -69,7 +78,6 @@ def start_analysis(session_state, key: str, client, cfg, model_name: str):
     analyses = dict(session_state.get("analyses", {}))
 
     # 获取 price_df 的副本
-    import pandas as pd
     df = session_state.get("price_df", pd.DataFrame())
     if not df.empty:
         df = df.copy()
@@ -83,25 +91,20 @@ def start_analysis(session_state, key: str, client, cfg, model_name: str):
     # 用户名（用于 token 归属）
     username = session_state.get("current_user", "")
 
-    # 选择对应的分析函数
-    if key == "expectation":
-        target = _run_expectation
-        args = (job, client, cfg, model_name, name, tscode, info, username)
-    elif key == "trend":
-        target = _run_trend
-        args = (job, client, cfg, model_name, name, tscode, df, cap, dragon, northbound, margin, username)
-    elif key == "fundamentals":
-        target = _run_fundamentals
-        args = (job, client, cfg, model_name, name, tscode, info, fin, username)
-    elif key == "sentiment":
-        target = _run_sentiment
-        args = (job, client, cfg, model_name, name, tscode, info, username)
-    elif key == "sector":
-        target = _run_sector
-        args = (job, client, cfg, model_name, name, tscode, info, sector, username)
-    elif key == "holders":
-        target = _run_holders
-        args = (job, client, cfg, model_name, name, tscode, info, holders, pledge, fund_hold, username)
+    # 分析调度表：key → (label, build_fn, build_args)
+    dispatch = {
+        "expectation":  ("预期差分析", build_expectation_prompt, (name, tscode, info)),
+        "trend":        ("K线趋势研判", _build_trend, (name, tscode, df, cap, dragon, northbound, margin)),
+        "fundamentals": ("基本面剖析", build_fundamentals_prompt, (name, tscode, info, fin)),
+        "sentiment":    ("舆情情绪分析", build_sentiment_prompt, (name, tscode, info)),
+        "sector":       ("板块联动分析", build_sector_prompt, (name, tscode, info, sector)),
+        "holders":      ("股东/机构动向分析", build_holders_prompt, (name, tscode, info, holders, pledge, fund_hold)),
+    }
+
+    if key in dispatch:
+        label, build_fn, build_args = dispatch[key]
+        target = _run_generic
+        args = (job, client, cfg, model_name, label, build_fn, build_args, username)
     elif key == "moe":
         target = _run_moe
         args = (job, client, cfg, model_name, name, tscode, analyses, username)
@@ -133,109 +136,34 @@ def collect_result(session_state, key: str):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 各分析任务（在后台线程中执行，不能用 st.* 函数）
+# 通用分析模板（在后台线程中执行，不能用 st.* 函数）
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _run_expectation(job, client, cfg, model_name, name, tscode, info, username=""):
+def _run_generic(job, client, cfg, model_name, label, build_fn, build_args, username=""):
+    """通用分析流程：构建 prompt → 调用 AI → 处理结果"""
     try:
         _log(job, f"📡 正在连接 {model_name}...")
-        time.sleep(0.6)
-        _log(job, f"🌐 联网搜索 {name} 最新资讯、研报、公告...")
-        time.sleep(0.5)
-        _log(job, "📰 整理市场预期与实际情况的差异...")
-        p, s = build_expectation_prompt(name, tscode, info)
-        time.sleep(0.4)
-        _log(job, "🤖 AI 正在深度分析预期差，通常需要 15~30 秒...")
+        _log(job, f"🤖 AI 正在进行{label}...")
+        p, s = build_fn(*build_args)
         result, err = call_ai(client, cfg, p, system=s, max_tokens=8000, username=username)
         if err:
-            _log(job, f"❌ 预期差分析失败：{err}")
-            job["result"] = f"⚠️ 预期差分析失败：{err}"
+            _log(job, f"❌ {label}失败：{err}")
+            job["result"] = f"⚠️ {label}失败：{err}"
             job["error"] = err
-            job["status"] = "done"
-            return
-        _log(job, "📝 正在整理分析结论...")
-        time.sleep(0.3)
-        _log(job, "✅ 预期差分析完成！")
-        job["result"] = result
+        else:
+            _log(job, f"✅ {label}完成！")
+            job["result"] = result
         job["status"] = "done"
     except Exception as e:
+        logger.debug("[_run_generic/%s] 异常: %s", label, e)
         _log(job, f"❌ 异常：{e}")
-        job["result"] = f"⚠️ 预期差分析异常：{e}"
+        job["result"] = f"⚠️ {label}异常：{e}"
         job["status"] = "done"
 
 
-def _run_trend(job, client, cfg, model_name, name, tscode, df, cap, dragon,
-               northbound="", margin="", username=""):
-    try:
-        _log(job, f"📡 正在连接 {model_name}...")
-        time.sleep(0.6)
-        _log(job, "📊 读取近 140 日K线数据...")
-        time.sleep(0.4)
-        _log(job, "📐 计算均线系统（MA5 / MA20 / MA60）...")
-        psmry = price_summary(df)
-        time.sleep(0.4)
-        _log(job, "💰 分析主力资金流向...")
-        time.sleep(0.3)
-        _log(job, "🐉 检索龙虎榜数据...")
-        time.sleep(0.3)
-        if northbound and northbound != "暂无北向资金持仓数据":
-            _log(job, "🌏 分析北向资金持仓变化...")
-            time.sleep(0.3)
-        if margin and margin != "暂无融资融券数据":
-            _log(job, "📊 分析融资融券趋势...")
-            time.sleep(0.3)
-        _log(job, "📐 构建技术分析框架（支撑位 / 压力位 / 形态识别）...")
-        p, s = build_trend_prompt(name, tscode, psmry, cap, dragon,
-                                  northbound, margin)
-        time.sleep(0.4)
-        _log(job, "🤖 AI 正在研判趋势走向，通常需要 15~30 秒...")
-        result, err = call_ai(client, cfg, p, system=s, max_tokens=8000, username=username)
-        if err:
-            _log(job, f"❌ 趋势研判失败：{err}")
-            job["result"] = f"⚠️ 趋势研判失败：{err}"
-            job["error"] = err
-            job["status"] = "done"
-            return
-        _log(job, "📝 正在整理研判结论...")
-        time.sleep(0.3)
-        _log(job, "✅ K线趋势研判完成！")
-        job["result"] = result
-        job["status"] = "done"
-    except Exception as e:
-        _log(job, f"❌ 异常：{e}")
-        job["result"] = f"⚠️ 趋势研判异常：{e}"
-        job["status"] = "done"
-
-
-def _run_fundamentals(job, client, cfg, model_name, name, tscode, info, fin, username=""):
-    try:
-        _log(job, f"📡 正在连接 {model_name}...")
-        time.sleep(0.6)
-        _log(job, "📑 读取财务报表（利润表 / 资产负债表 / 现金流）...")
-        time.sleep(0.5)
-        _log(job, "🔢 计算核心指标（ROE / 毛利率 / 营收增速 / 负债率）...")
-        time.sleep(0.4)
-        _log(job, "🏭 对比行业估值水平与竞争格局...")
-        p, s = build_fundamentals_prompt(name, tscode, info, fin)
-        time.sleep(0.4)
-        _log(job, "🤖 AI 正在深度剖析基本面，通常需要 15~30 秒...")
-        result, err = call_ai(client, cfg, p, system=s, max_tokens=8000, username=username)
-        if err:
-            _log(job, f"❌ 基本面剖析失败：{err}")
-            job["result"] = f"⚠️ 基本面剖析失败：{err}"
-            job["error"] = err
-            job["status"] = "done"
-            return
-        _log(job, "📝 正在整理分析结论...")
-        time.sleep(0.3)
-        _log(job, "✅ 基本面剖析完成！")
-        job["result"] = result
-        job["status"] = "done"
-    except Exception as e:
-        _log(job, f"❌ 异常：{e}")
-        job["result"] = f"⚠️ 基本面剖析异常：{e}"
-        job["status"] = "done"
-
+# ══════════════════════════════════════════════════════════════════════════════
+# MoE 辩论（多轮对话，保持独立函数）
+# ══════════════════════════════════════════════════════════════════════════════
 
 def _run_moe(job, client, cfg, model_name, name, tscode, analyses, username=""):
     from analysis.moe import MOE_ROLES, CEO_SYSTEM
@@ -243,10 +171,8 @@ def _run_moe(job, client, cfg, model_name, name, tscode, analyses, username=""):
 
     try:
         _log(job, "📋 汇总预期差、趋势、基本面三项分析结果...")
-        time.sleep(0.5)
         context = build_analysis_context(analyses, max_per_module=15)
         _log(job, "🏟️ 召集五方专家进入辩论会场...")
-        time.sleep(0.5)
 
         role_results = {}
         for i, role in enumerate(MOE_ROLES, 1):
@@ -275,10 +201,8 @@ def _run_moe(job, client, cfg, model_name, name, tscode, analyses, username=""):
                 text = f"⚠️ 该角色分析失败：{err}"
             role_results[role["key"]] = text
             _log(job, f"  ✓ {role['badge']} 观点已提交")
-            time.sleep(0.3)
 
         _log(job, "👔 首席执行官正在综合五方观点，做最终裁决...")
-        time.sleep(0.4)
 
         roles_text = "\n\n".join(
             f"【{r['badge']}】\n{role_results.get(r['key'], '')}"
@@ -336,103 +260,7 @@ def _run_moe(job, client, cfg, model_name, name, tscode, analyses, username=""):
         job["status"] = "done"
 
     except Exception as e:
+        logger.debug("[_run_moe] 异常: %s", e)
         _log(job, f"❌ 异常：{e}")
         job["result"] = f"⚠️ MoE 辩论异常：{e}"
-        job["status"] = "done"
-
-
-def _run_sentiment(job, client, cfg, model_name, name, tscode, info, username=""):
-    try:
-        _log(job, f"📡 正在连接 {model_name}...")
-        time.sleep(0.6)
-        _log(job, f"🔍 搜索雪球（xueqiu.com）关于 {name} 的讨论...")
-        time.sleep(0.5)
-        _log(job, "🔍 搜索东方财富股吧热帖...")
-        time.sleep(0.4)
-        _log(job, "🔍 搜索同花顺、财联社等财经媒体...")
-        time.sleep(0.4)
-        _log(job, "🧹 过滤灌水/广告/无效内容，提取高质量讨论...")
-        p, s = build_sentiment_prompt(name, tscode, info)
-        time.sleep(0.4)
-        _log(job, "🤖 AI 正在分析舆情情绪，通常需要 20~40 秒...")
-        result, err = call_ai(client, cfg, p, system=s, max_tokens=8000, username=username)
-        if err:
-            _log(job, f"❌ 舆情分析失败：{err}")
-            job["result"] = f"⚠️ 舆情分析失败：{err}"
-            job["error"] = err
-            job["status"] = "done"
-            return
-        _log(job, "📝 整理舆情分析结论...")
-        time.sleep(0.3)
-        _log(job, "✅ 舆情情绪分析完成！")
-        job["result"] = result
-        job["status"] = "done"
-    except Exception as e:
-        _log(job, f"❌ 异常：{e}")
-        job["result"] = f"⚠️ 舆情分析异常：{e}"
-        job["status"] = "done"
-
-
-def _run_sector(job, client, cfg, model_name, name, tscode, info, sector_data, username=""):
-    try:
-        _log(job, f"📡 正在连接 {model_name}...")
-        time.sleep(0.6)
-        industry = info.get("行业", "未知")
-        _log(job, f"🏭 分析 {industry} 板块整体态势...")
-        time.sleep(0.5)
-        _log(job, f"🔍 联网搜索 {industry} 板块近期资金流向与催化事件...")
-        time.sleep(0.4)
-        _log(job, f"📊 对比 {name} 与同行业个股估值/走势...")
-        p, s = build_sector_prompt(name, tscode, info, sector_data)
-        time.sleep(0.4)
-        _log(job, "🤖 AI 正在进行板块联动分析，通常需要 15~30 秒...")
-        result, err = call_ai(client, cfg, p, system=s, max_tokens=8000, username=username)
-        if err:
-            _log(job, f"❌ 板块分析失败：{err}")
-            job["result"] = f"⚠️ 板块分析失败：{err}"
-            job["error"] = err
-            job["status"] = "done"
-            return
-        _log(job, "📝 整理板块分析结论...")
-        time.sleep(0.3)
-        _log(job, "✅ 板块联动分析完成！")
-        job["result"] = result
-        job["status"] = "done"
-    except Exception as e:
-        _log(job, f"❌ 异常：{e}")
-        job["result"] = f"⚠️ 板块分析异常：{e}"
-        job["status"] = "done"
-
-
-def _run_holders(job, client, cfg, model_name, name, tscode, info,
-                 holders_data, pledge_data, fund_data, username=""):
-    try:
-        _log(job, f"📡 正在连接 {model_name}...")
-        time.sleep(0.6)
-        _log(job, f"👥 分析 {name} 股东结构...")
-        time.sleep(0.5)
-        _log(job, "🔍 联网搜索最新减持/增持公告、解禁信息...")
-        time.sleep(0.4)
-        _log(job, "🏛️ 分析机构持仓变动趋势...")
-        time.sleep(0.4)
-        _log(job, "⚠️ 评估股权质押风险...")
-        p, s = build_holders_prompt(name, tscode, info, holders_data,
-                                     pledge_data, fund_data)
-        time.sleep(0.4)
-        _log(job, "🤖 AI 正在分析股东动向，通常需要 15~30 秒...")
-        result, err = call_ai(client, cfg, p, system=s, max_tokens=8000, username=username)
-        if err:
-            _log(job, f"❌ 股东分析失败：{err}")
-            job["result"] = f"⚠️ 股东分析失败：{err}"
-            job["error"] = err
-            job["status"] = "done"
-            return
-        _log(job, "📝 整理股东分析结论...")
-        time.sleep(0.3)
-        _log(job, "✅ 股东/机构动向分析完成！")
-        job["result"] = result
-        job["status"] = "done"
-    except Exception as e:
-        _log(job, f"❌ 异常：{e}")
-        job["result"] = f"⚠️ 股东分析异常：{e}"
         job["status"] = "done"

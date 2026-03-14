@@ -4,10 +4,18 @@
 Multi-Model + Tushare · 模块化架构
 """
 
+import logging
 import sys
 import time
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
+
+# 配置日志（DEBUG 级别输出到 stderr，不影响 Streamlit UI）
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+    datefmt="%H:%M:%S",
+)
 
 import streamlit as st
 
@@ -46,6 +54,8 @@ from analysis.runner import (
 )
 
 inject_css()
+
+logger = logging.getLogger(__name__)
 
 
 def _show_login():
@@ -105,8 +115,8 @@ def _save_analysis_to_history():
     try:
         from utils.archive import save_archive
         save_archive(st.session_state)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("[_auto_save] 归档失败: %s", e)
 
     # 生成摘要：每个分析取前80字
     parts = []
@@ -144,8 +154,8 @@ def main():
     try:
         from utils.backup import start_backup_scheduler
         start_backup_scheduler()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("[main] 备份调度器启动失败: %s", e)
 
     # ── Header ────────────────────────────────────────────────────────────
     st.markdown("""
@@ -863,8 +873,8 @@ def main():
             try:
                 from utils.archive import save_archive
                 save_archive(st.session_state)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("[poll] 归档失败: %s", e)
             # 保存到共享缓存
             try:
                 from utils.shared_cache import save_shared
@@ -877,8 +887,8 @@ def main():
                     moe_results=st.session_state.get("moe_results"),
                     stock_info=st.session_state.get("stock_info"),
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("[poll] 共享缓存保存失败: %s", e)
 
         if _is_running_now:
             time.sleep(1.5)

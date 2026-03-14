@@ -1,9 +1,12 @@
 """当日分析共享缓存 — 亲友间共享分析结果，节省 Token"""
 
 import json
+import logging
 import os
 from datetime import datetime, date
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 CACHE_DIR = Path(__file__).parent.parent / "data" / "shared_cache"
 
@@ -45,8 +48,8 @@ def save_shared(stock_code: str, stock_name: str, model_name: str,
     try:
         cache_file.write_text(json.dumps(data, ensure_ascii=False, indent=2),
                               encoding="utf-8")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("[save_shared] 写入缓存失败: %s", e)
 
 
 def find_shared(stock_code: str, exclude_user: str = "") -> list[dict]:
@@ -74,7 +77,8 @@ def find_shared(stock_code: str, exclude_user: str = "") -> list[dict]:
                 "has_moe": bool(data.get("moe_results")),
                 "file_path": str(f),
             })
-        except Exception:
+        except Exception as e:
+            logger.debug("[find_shared] 读取缓存文件失败: %s", e)
             continue
 
     # 按时间倒排
@@ -86,7 +90,8 @@ def load_shared(file_path: str) -> dict | None:
     """加载共享缓存的完整数据"""
     try:
         return json.loads(Path(file_path).read_text(encoding="utf-8"))
-    except Exception:
+    except Exception as e:
+        logger.debug("[load_shared] 加载失败: %s", e)
         return None
 
 
