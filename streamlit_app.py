@@ -648,6 +648,7 @@ def main():
                         start_analysis(st.session_state, key, client, cfg_now,
                                        selected_model)
             st.session_state["active_view"] = "overview"
+            st.session_state["_skip_poll_sleep"] = True
             st.rerun()
 
     # ══════════════════════════════════════════════════════════════════════
@@ -723,6 +724,7 @@ def main():
                         if client and stock_ready:
                             start_analysis(st.session_state, key, client, cfg_now,
                                            selected_model)
+                    st.session_state["_skip_poll_sleep"] = True
                     st.rerun()
 
         # 深度分析按钮：仅在核心三项完成后显示（独立行）
@@ -742,6 +744,7 @@ def main():
                                 start_analysis(st.session_state, dk, client, cfg_now,
                                                selected_model)
                         st.session_state["_auto_sim"] = True
+                    st.session_state["_skip_poll_sleep"] = True
                     st.rerun()
 
         # ── 紧凑状态栏 ──────────────────────────────────────────
@@ -1141,8 +1144,12 @@ def main():
                 logger.debug("[poll] 共享缓存保存失败: %s", e)
 
         if _is_running_now:
-            time.sleep(0.5)
-            st.rerun()
+            # 按钮刚触发时跳过 sleep，让 UI 立即刷新
+            if st.session_state.pop("_skip_poll_sleep", False):
+                st.rerun()
+            else:
+                time.sleep(0.3)
+                st.rerun()
 
 
 def _show_compare_tab(client, cfg, model_name):
