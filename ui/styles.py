@@ -197,38 +197,45 @@ html, body, [data-testid="stAppViewContainer"] {
   box-shadow: 0 6px 20px rgba(99,102,241,0.4) !important;
 }
 
-/* 操作按钮行：模仿 Tab 栏风格，作为子导航层级 */
+/* 操作按钮行：紧凑 Tab 风格，与上方 Tab 栏呼应 */
 [data-testid="stHorizontalBlock"]:has(.stButton) {
   background: var(--bg-card) !important;
   border: 1px solid var(--border) !important;
   border-radius: 50px !important;
-  padding: 4px !important;
-  gap: 2px !important;
+  padding: 3px !important;
+  gap: 1px !important;
   box-shadow: var(--shadow) !important;
   width: fit-content !important;
-  margin-left: 12px !important;
+  margin-left: 8px !important;
   position: relative;
 }
 /* 左侧小竖线：视觉上体现子级关系 */
 [data-testid="stHorizontalBlock"]:has(.stButton)::before {
   content: "";
   position: absolute;
-  left: -8px;
+  left: -6px;
   top: 25%;
   height: 50%;
-  width: 3px;
+  width: 2px;
   border-radius: 2px;
   background: linear-gradient(180deg, var(--blue), var(--purple));
-  opacity: 0.5;
+  opacity: 0.45;
 }
 [data-testid="stHorizontalBlock"]:has(.stButton) .stButton button {
   border-radius: 50px !important;
   font-family: 'Nunito', sans-serif !important;
   font-weight: 600 !important;
-  font-size: 0.85rem !important;
-  padding: 6px 16px !important;
+  font-size: 0.78rem !important;
+  padding: 5px 12px !important;
   min-height: unset !important;
   white-space: nowrap !important;
+  transition: transform 0.15s ease, box-shadow 0.15s ease !important;
+}
+/* 悬浮放大效果 */
+[data-testid="stHorizontalBlock"]:has(.stButton) .stButton button:hover {
+  transform: scale(1.08) !important;
+  z-index: 2 !important;
+  position: relative !important;
 }
 [data-testid="stHorizontalBlock"]:has(.stButton) .stButton button:not([kind="primary"]) {
   background: transparent !important;
@@ -236,8 +243,16 @@ html, body, [data-testid="stAppViewContainer"] {
   color: var(--text-mid) !important;
   box-shadow: none !important;
 }
+[data-testid="stHorizontalBlock"]:has(.stButton) .stButton button:not([kind="primary"]):hover {
+  background: var(--bg-soft) !important;
+  color: var(--blue) !important;
+  box-shadow: 0 2px 8px rgba(99,102,241,0.15) !important;
+}
 [data-testid="stHorizontalBlock"]:has(.stButton) .stButton button[kind="primary"] {
-  box-shadow: 0 2px 10px rgba(99,102,241,0.3) !important;
+  box-shadow: 0 2px 8px rgba(99,102,241,0.25) !important;
+}
+[data-testid="stHorizontalBlock"]:has(.stButton) .stButton button[kind="primary"]:hover {
+  box-shadow: 0 4px 14px rgba(99,102,241,0.4) !important;
 }
 
 /* Input */
@@ -491,12 +506,17 @@ hr { border-color: var(--border) !important; margin: 1rem 0 !important; }
     width: 0 !important;
   }
   [data-testid="stHorizontalBlock"]:has(.stButton) .stButton button {
-    font-size: 0.72rem !important;
-    padding: 5px 4px !important;
+    font-size: 0.68rem !important;
+    padding: 4px 2px !important;
     border-radius: 50px !important;
     white-space: nowrap !important;
     overflow: hidden !important;
     text-overflow: ellipsis !important;
+  }
+  /* 手机端悬浮/触摸放大 */
+  [data-testid="stHorizontalBlock"]:has(.stButton) .stButton button:active {
+    transform: scale(1.12) !important;
+    z-index: 2 !important;
   }
 
   /* st.status 折叠态：强制横排不换行 */
