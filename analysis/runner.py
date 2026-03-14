@@ -49,10 +49,49 @@ def any_running(session_state) -> bool:
     return any(j.get("status") == "running" for j in jobs.values())
 
 
-def _build_trend(name, tscode, df, cap, dragon, northbound, margin):
-    """趋势分析专用：先算价格摘要再构建 prompt"""
+# ══════════════════════════════════════════════════════════════════════════════
+# 数据自取 + prompt 构建（在后台线程中运行，自行获取专属数据）
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _build_trend(job, name, tscode, df):
+    """趋势分析：线程内获取资金/龙虎榜/北向/融资融券数据"""
+    from data.tushare_client import (
+        get_capital_flow, get_dragon_tiger,
+        get_northbound_flow, get_margin_trading,
+    )
+    _log(job, "📊 计算K线技术指标...")
     psmry = price_summary(df)
-    return build_trend_prompt(name, tscode, psmry, cap, dragon, northbound, margin)
+    _log(job, "💰 获取主力资金流向...")
+    cap, _ = get_capital_flow(tscode)
+    _log(job, "🐉 获取龙虎榜数据...")
+    dragon, _ = get_dragon_tiger(tscode)
+    _log(job, "🌏 获取北向资金持仓...")
+    nb, _ = get_northbound_flow(tscode)
+    _log(job, "📊 获取融资融券数据...")
+    margin, _ = get_margin_trading(tscode)
+    return build_trend_prompt(name, tscode, psmry, cap, dragon, nb, margin)
+
+
+def _build_sector(job, name, tscode, info):
+    """板块分析：线程内获取同行业对比数据"""
+    from data.tushare_client import get_sector_peers
+    _log(job, "🏭 获取同行业个股对比数据...")
+    sector_data, _ = get_sector_peers(tscode)
+    return build_sector_prompt(name, tscode, info, sector_data)
+
+
+def _build_holders(job, name, tscode, info):
+    """股东分析：线程内获取股东/质押/基金持仓数据"""
+    from data.tushare_client import (
+        get_holders_info, get_pledge_info, get_fund_holdings,
+    )
+    _log(job, "👥 获取十大股东数据...")
+    holders, _ = get_holders_info(tscode)
+    _log(job, "⚠️ 获取股权质押数据...")
+    pledge, _ = get_pledge_info(tscode)
+    _log(job, "🏛️ 获取基金持仓数据...")
+    fund, _ = get_fund_holdings(tscode)
+    return build_holders_prompt(name, tscode, info, holders, pledge, fund)
 
 
 def start_analysis(session_state, key: str, client, cfg, model_name: str):
@@ -66,39 +105,30 @@ def start_analysis(session_state, key: str, client, cfg, model_name: str):
     job = _new_job()
     jobs[key] = job
 
-    # 从 session_state 读取所有需要的数据（在主线程中读，传给子线程）
+    # 从 session_state 读取通用数据（在主线程中读，传给子线程）
     name   = session_state.get("stock_name", "")
     tscode = session_state.get("stock_code", "")
     info   = dict(session_state.get("stock_info", {}))
     fin    = session_state.get("stock_fin", "")
-    cap    = session_state.get("stock_cap", "")
-    dragon = session_state.get("stock_dragon", "")
-    northbound = session_state.get("stock_northbound", "")
-    margin = session_state.get("stock_margin", "")
     analyses = dict(session_state.get("analyses", {}))
 
-    # 获取 price_df 的副本
+    # 获取 price_df 的副本（仅趋势分析需要）
     df = session_state.get("price_df", pd.DataFrame())
     if not df.empty:
         df = df.copy()
-
-    # 额外数据（板块/股东）
-    holders  = session_state.get("stock_holders", "")
-    pledge   = session_state.get("stock_pledge", "")
-    fund_hold = session_state.get("stock_fund_holdings", "")
-    sector   = session_state.get("stock_sector_peers", "")
 
     # 用户名（用于 token 归属）
     username = session_state.get("current_user", "")
 
     # 分析调度表：key → (label, build_fn, build_args)
+    # 趋势/板块/股东的 build 函数会在线程内自行获取专属数据
     dispatch = {
         "expectation":  ("预期差分析", build_expectation_prompt, (name, tscode, info)),
-        "trend":        ("K线趋势研判", _build_trend, (name, tscode, df, cap, dragon, northbound, margin)),
+        "trend":        ("K线趋势研判", _build_trend, (job, name, tscode, df)),
         "fundamentals": ("基本面剖析", build_fundamentals_prompt, (name, tscode, info, fin)),
         "sentiment":    ("舆情情绪分析", build_sentiment_prompt, (name, tscode, info)),
-        "sector":       ("板块联动分析", build_sector_prompt, (name, tscode, info, sector)),
-        "holders":      ("股东/机构动向分析", build_holders_prompt, (name, tscode, info, holders, pledge, fund_hold)),
+        "sector":       ("板块联动分析", _build_sector, (job, name, tscode, info)),
+        "holders":      ("股东/机构动向分析", _build_holders, (job, name, tscode, info)),
     }
 
     if key in dispatch:

@@ -42,10 +42,7 @@ from ui.results import (
 )
 from data.tushare_client import (
     ts_ok, get_ts_error, get_data_source, resolve_stock, to_code6,
-    get_basic_info, get_price_df, get_financial,
-    get_capital_flow, get_dragon_tiger,
-    get_valuation_history, get_northbound_flow, get_margin_trading,
-    get_sector_peers, get_holders_info, get_pledge_info, get_fund_holdings,
+    get_basic_info, get_price_df, get_financial, get_valuation_history,
 )
 from ai.client import get_ai_client, get_token_usage
 from analysis.runner import (
@@ -449,28 +446,23 @@ def main():
     _auto_search = bool(_top10_pick)
 
     # ══════════════════════════════════════════════════════════════════════
-    # 查询股票逻辑（由智能分析 Tab 内的按钮或 Top10 自动触发）
+    # 股票解析 + 最少数据获取（由一键分析或各分析按钮触发）
     # ══════════════════════════════════════════════════════════════════════
-    search_btn = st.session_state.pop("_trigger_search", False) or _auto_search
-    if _auto_search:
-        query = _top10_pick
-    if search_btn and query:
+    def _resolve_and_fetch(q: str):
+        """解析股票 + 获取最少通用数据（info/K线/财务/估值），立即返回以启动分析"""
         _save_analysis_to_history()
-        for k in ["analyses", "moe_results", "stock_fin", "stock_cap",
-                   "stock_dragon", "stock_northbound", "stock_margin",
-                   "valuation_df", "stock_sector_peers", "stock_holders",
-                   "stock_pledge", "stock_fund_holdings",
+        for k in ["analyses", "moe_results", "stock_fin",
+                   "valuation_df",
                    "qa_history", "similarity_results", "_show_sim",
                    "active_tab", "_jobs"]:
             st.session_state.pop(k, None)
-        # 清除重新分析确认状态
         for k in list(st.session_state.keys()):
             if k.startswith("_confirm_redo_"):
                 del st.session_state[k]
         st.session_state["analyses"] = {}
 
         with st.spinner("🔍 解析股票中..."):
-            ts_code, name, resolve_warn = resolve_stock(query)
+            ts_code, name, resolve_warn = resolve_stock(q)
         if resolve_warn:
             st.markdown(f'<div class="status-banner warn">⚠️ {resolve_warn}</div>',
                         unsafe_allow_html=True)
@@ -479,7 +471,7 @@ def main():
         st.session_state["stock_name"] = name
         data_errors = []
 
-        with st.status(f"📥 正在获取 {name} 的市场数据...", expanded=True) as s:
+        with st.status(f"📥 正在获取 {name} 的核心数据...", expanded=True) as s:
             st.write("▶ 基本信息 & 估值指标...")
             info, e = get_basic_info(ts_code)
             if e: data_errors.append(e)
@@ -495,56 +487,21 @@ def main():
             if e: data_errors.append(e)
             st.session_state["stock_fin"] = fin
 
-            st.write("▶ 主力资金流向...")
-            cap, e = get_capital_flow(ts_code)
-            if e: data_errors.append(e)
-            st.session_state["stock_cap"] = cap
-
-            st.write("▶ 龙虎榜...")
-            dragon, e = get_dragon_tiger(ts_code)
-            if e: data_errors.append(e)
-            st.session_state["stock_dragon"] = dragon
-
-            st.write("▶ 历史估值数据（PE/PB分位）...")
+            st.write("▶ 历史估值数据...")
             val_df, e = get_valuation_history(ts_code)
             if e: data_errors.append(e)
             st.session_state["valuation_df"] = val_df
-
-            st.write("▶ 北向资金持仓...")
-            nb_flow, e = get_northbound_flow(ts_code)
-            if e: data_errors.append(e)
-            st.session_state["stock_northbound"] = nb_flow
-
-            st.write("▶ 融资融券数据...")
-            margin, e = get_margin_trading(ts_code)
-            if e: data_errors.append(e)
-            st.session_state["stock_margin"] = margin
-
-            st.write("▶ 同行业个股对比...")
-            sector_peers, e = get_sector_peers(ts_code)
-            if e: data_errors.append(e)
-            st.session_state["stock_sector_peers"] = sector_peers
-
-            st.write("▶ 十大股东...")
-            holders, e = get_holders_info(ts_code)
-            if e: data_errors.append(e)
-            st.session_state["stock_holders"] = holders
-
-            st.write("▶ 股权质押...")
-            pledge, e = get_pledge_info(ts_code)
-            if e: data_errors.append(e)
-            st.session_state["stock_pledge"] = pledge
-
-            st.write("▶ 基金持仓...")
-            fund_hold, e = get_fund_holdings(ts_code)
-            if e: data_errors.append(e)
-            st.session_state["stock_fund_holdings"] = fund_hold
-            s.update(label="✅ 数据获取完成！", state="complete")
+            s.update(label="✅ 核心数据获取完成！", state="complete")
 
         if data_errors:
             st.markdown(f"""<div class="status-banner warn">
   ⚠️ <strong>部分数据获取受限</strong>：{' | '.join(data_errors[:3])}
 </div>""", unsafe_allow_html=True)
+
+    # Top10 自动跳转触发
+    if _auto_search and _top10_pick:
+        _resolve_and_fetch(_top10_pick)
+        st.session_state["_last_query"] = _top10_pick
 
     # ══════════════════════════════════════════════════════════════════════
     # 获取 AI 客户端（各 Tab 共用）
@@ -562,7 +519,7 @@ def main():
         done = moe_done if is_moe else bool(analyses.get(key))
         running = is_running(st.session_state, key)
 
-        if not stock_ready:
+        if not stock_ready and not query:
             st.button(f"{icon} {label}", disabled=True, use_container_width=True,
                       key=f"btn_{key}")
             return False
@@ -598,17 +555,10 @@ def main():
     # Tab 1: 📊 智能分析
     # ══════════════════════════════════════════════════════════════════════
     with tab_analysis:
-        # ── 操作栏：查询 + 一键分析 + 各模块按钮（始终在顶部）────────
-        _action_cols = st.columns([1.2, 1.5, 1, 1, 1, 1, 1, 1, 1, 1])
+        # ── 操作栏：一键分析 + 各模块按钮（始终在顶部）────────
+        _action_cols = st.columns([1.5, 1, 1, 1, 1, 1, 1, 1, 1])
         need_rerun = False
         btn_sim = False
-
-        with _action_cols[0]:
-            _do_search = st.button("🔍 查询股票", type="primary",
-                                   use_container_width=True, key="btn_search")
-            if _do_search and query:
-                st.session_state["_trigger_search"] = True
-                st.rerun()
 
         # 核心三项
         items = [
@@ -623,18 +573,24 @@ def main():
             ("holders", "股东", "👥"),
         ]
 
-        with _action_cols[1]:
+        with _action_cols[0]:
             core_keys = ["expectation", "trend", "fundamentals"]
-            core_all_done = all(
+            core_all_done = stock_ready and all(
                 (analyses.get(k) or is_running(st.session_state, k)) for k in core_keys
             )
             if core_all_done:
                 st.button("✅ 核心已完成", disabled=True,
                           use_container_width=True, key="btn_all")
             else:
-                if st.button("🚀 一键分析", type="primary" if stock_ready else "secondary",
+                if st.button("🚀 一键分析", type="primary",
                              use_container_width=True, key="btn_all",
-                             disabled=not stock_ready):
+                             disabled=not query):
+                    # 新查询或首次：解析 + 获取最少数据
+                    _last_q = st.session_state.get("_last_query", "")
+                    if not stock_ready or query != _last_q:
+                        _resolve_and_fetch(query)
+                        st.session_state["_last_query"] = query
+                        stock_ready = True  # 刚解析完成
                     if client:
                         for key in core_keys:
                             if not analyses.get(key) and not is_running(st.session_state, key):
@@ -642,23 +598,31 @@ def main():
                                                selected_model)
                         need_rerun = True
 
-        for col_idx, (key, label, icon) in zip(range(2, 5), items):
+        for col_idx, (key, label, icon) in zip(range(1, 4), items):
             with _action_cols[col_idx]:
                 if _analysis_button(key, label, icon):
-                    if client and not is_running(st.session_state, key):
+                    if not stock_ready and query:
+                        _resolve_and_fetch(query)
+                        st.session_state["_last_query"] = query
+                        stock_ready = True
+                    if client and stock_ready and not is_running(st.session_state, key):
                         start_analysis(st.session_state, key, client, cfg_now,
                                        selected_model)
                         need_rerun = True
 
-        for col_idx, (key, label, icon) in zip(range(5, 8), deep_items):
+        for col_idx, (key, label, icon) in zip(range(4, 7), deep_items):
             with _action_cols[col_idx]:
                 if _analysis_button(key, label, icon):
-                    if client and not is_running(st.session_state, key):
+                    if not stock_ready and query:
+                        _resolve_and_fetch(query)
+                        st.session_state["_last_query"] = query
+                        stock_ready = True
+                    if client and stock_ready and not is_running(st.session_state, key):
                         start_analysis(st.session_state, key, client, cfg_now,
                                        selected_model)
                         need_rerun = True
 
-        with _action_cols[8]:
+        with _action_cols[7]:
             if _analysis_button("moe", "MoE", "🎯", needs_prereq=True,
                                 prereq_keys=["expectation", "trend", "fundamentals"]):
                 if client and not is_running(st.session_state, "moe"):
@@ -666,7 +630,7 @@ def main():
                                    selected_model)
                     need_rerun = True
 
-        with _action_cols[9]:
+        with _action_cols[8]:
             btn_sim = st.button("📐 K线匹配", use_container_width=True, key="btn_sim",
                                 disabled=not stock_ready)
 
@@ -677,7 +641,7 @@ def main():
 
         # ── 主内容区 ─────────────────────────────────────────────
         if not stock_ready:
-            st.info("请在上方输入股票代码/名称，点击「🔍 查询股票」开始分析")
+            st.info("请在上方输入股票代码/名称，点击「🚀 一键分析」开始")
         else:
             _show_stock_overview()
             st.markdown("---")
@@ -844,7 +808,7 @@ def main():
     # ══════════════════════════════════════════════════════════════════════
     with tab_qa:
         if not stock_ready:
-            st.info("请先在上方查询股票，然后即可自由提问")
+            st.info("请先在上方输入股票并一键分析，然后即可自由提问")
         elif not client:
             st.warning("AI 模型不可用，请检查 API Key")
         else:
