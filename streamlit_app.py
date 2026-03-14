@@ -419,20 +419,22 @@ def main():
             _go_disabled = False
 
         # 构建股票搜索候选列表（带缓存）
-        if "_stock_options" not in st.session_state:
+        if "_stock_options" not in st.session_state or st.session_state.get("_stock_opts_ver") != 2:
             try:
                 from data.tushare_client import load_stock_list
                 _sl_df, _ = load_stock_list()
                 if not _sl_df.empty:
                     _opts = [
-                        f"{row.get('symbol', row.get('ts_code', '').split('.')[0])} {row.get('name', '')}"
+                        f"{str(row.get('symbol', row.get('ts_code', '').split('.')[0])).zfill(6)} {row.get('name', '')}"
                         for _, row in _sl_df.iterrows()
                     ]
                     st.session_state["_stock_options"] = sorted(_opts)
                 else:
                     st.session_state["_stock_options"] = []
+                st.session_state["_stock_opts_ver"] = 2
             except Exception:
                 st.session_state["_stock_options"] = []
+                st.session_state["_stock_opts_ver"] = 2
 
         _stock_options = st.session_state["_stock_options"]
 
@@ -480,13 +482,10 @@ def main():
     # ══════════════════════════════════════════════════════════════════════
     def _resolve_and_fetch(q: str):
         """解析股票 + 获取最少通用数据（info/K线/财务/估值），立即返回以启动分析"""
-        # selectbox 选中值格式为 "600547 航天发展"，提取名称或6位代码
+        # selectbox 选中值格式为 "000001 平安银行"，提取6位代码
         q = q.strip()
         if " " in q:
-            parts = q.split(None, 1)  # ["600547", "航天发展"]
-            code_part, name_part = parts[0], parts[1] if len(parts) > 1 else ""
-            # 优先用6位代码，否则用名称
-            q = code_part if len(code_part) == 6 and code_part.isdigit() else name_part or code_part
+            q = q.split()[0]  # 取代码部分（已 zfill(6)）
         _save_analysis_to_history()
         for k in ["analyses", "moe_results", "stock_fin",
                    "valuation_df",
