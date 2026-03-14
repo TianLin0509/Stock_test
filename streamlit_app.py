@@ -383,6 +383,7 @@ def main():
             st.rerun()
         query = st.session_state.get("_last_query", "")
         _auto_search = False
+        _go_clicked = False
         _sn = st.session_state.get("stock_name", "")
         _sc = st.session_state.get("stock_code", "")
         _expand_label = f"▽ {_sn}（{_sc}）" if _sn else "▽ 展开搜索区域"
