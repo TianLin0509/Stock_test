@@ -17,9 +17,12 @@ services:
       - ./user_data:/app/user_data
       # 分析归档持久化
       - ./data/archive:/app/data/archive
+      # 共享缓存（Top10 每日推荐等）
+      - ./data/shared_cache:/app/data/shared_cache
+      # Top10 运行缓存
+      - ./cache:/app/cache
     environment:
       - TZ=Asia/Shanghai
-    # 内存限制（按需调整）
     deploy:
       resources:
         limits:

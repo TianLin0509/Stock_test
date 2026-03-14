@@ -1,2 +1,12 @@
 [server]
 fileWatcherType = "poll"
+headless = true
+runOnSave = false
+maxUploadSize = 200
+
+[client]
+showErrorDetails = false
+toolbarMode = "viewer"
+
+[logger]
+level = "warning"
