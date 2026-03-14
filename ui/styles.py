@@ -240,6 +240,15 @@ html, body, [data-testid="stAppViewContainer"] {
 }
 hr { border-color: var(--border) !important; margin: 1rem 0 !important; }
 
+/* Token badge */
+.token-badge {
+  position: fixed; top: 12px; right: 20px; z-index: 9999;
+  background: rgba(99, 102, 241, 0.9); color: white;
+  padding: 4px 14px; border-radius: 20px;
+  font-size: 0.78em; font-weight: 600;
+  backdrop-filter: blur(8px); box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+}
+
 /* ═══════════════════════════════════════════════════════════════
    📱 MOBILE RESPONSIVE — 768px 以下生效
    ═══════════════════════════════════════════════════════════════ */
@@ -398,6 +407,41 @@ hr { border-color: var(--border) !important; margin: 1rem 0 !important; }
   h4 {
     font-size: 1rem !important;
   }
+
+  /* ── 列布局自适应：窄屏自动堆叠 ── */
+  [data-testid="stHorizontalBlock"] {
+    flex-wrap: wrap !important;
+    gap: 0.3rem !important;
+  }
+  [data-testid="stHorizontalBlock"] > div[data-testid="column"] {
+    flex: 1 1 100% !important;
+    min-width: 100% !important;
+    width: 100% !important;
+  }
+
+  /* 按钮行：每行2个，不完全堆叠 */
+  [data-testid="stHorizontalBlock"]:has(.stButton) > div[data-testid="column"] {
+    flex: 1 1 46% !important;
+    min-width: 46% !important;
+  }
+
+  /* 指标卡片：每行2个 */
+  [data-testid="stHorizontalBlock"]:has([data-testid="metric-container"]) > div[data-testid="column"] {
+    flex: 1 1 46% !important;
+    min-width: 46% !important;
+  }
+
+  /* 侧边栏宽度限制 */
+  [data-testid="stSidebar"] > div:first-child {
+    width: 85vw !important;
+    max-width: 300px !important;
+  }
+
+  /* Token badge 移到右下角 */
+  .token-badge {
+    top: auto; bottom: 10px; right: 10px;
+    font-size: 0.68em; padding: 3px 10px; opacity: 0.85;
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -450,6 +494,13 @@ hr { border-color: var(--border) !important; margin: 1rem 0 !important; }
   }
   h4 {
     font-size: 0.92rem !important;
+  }
+
+  /* 极窄屏：按钮和指标也完全单列 */
+  [data-testid="stHorizontalBlock"]:has(.stButton) > div[data-testid="column"],
+  [data-testid="stHorizontalBlock"]:has([data-testid="metric-container"]) > div[data-testid="column"] {
+    flex: 1 1 100% !important;
+    min-width: 100% !important;
   }
 }
 </style>

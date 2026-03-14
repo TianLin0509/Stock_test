@@ -173,13 +173,10 @@ def main():
             display = f"{total / 10000:.1f}万"
         else:
             display = f"{total:,}"
-        st.markdown(f"""<div style="
-            position: fixed; top: 12px; right: 20px; z-index: 9999;
-            background: rgba(99, 102, 241, 0.9); color: white;
-            padding: 4px 14px; border-radius: 20px;
-            font-size: 0.78em; font-weight: 600;
-            backdrop-filter: blur(8px); box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-        ">👤 {current_user} &nbsp;|&nbsp; 🪙 {display}</div>""", unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="token-badge">👤 {current_user} &nbsp;|&nbsp; 🪙 {display}</div>',
+            unsafe_allow_html=True,
+        )
 
     # ── Sidebar ───────────────────────────────────────────────────────────
     with st.sidebar:
@@ -583,7 +580,7 @@ def main():
         # Col 1-3: 核心三项按钮（同时充当标签页切换）
         _view_map = [
             (1, "expectation", "预期差", "🔍"),
-            (2, "trend", "趋势", "📈"),
+            (2, "trend", "趋势解读", "📈"),
             (3, "fundamentals", "基本面", "📋"),
         ]
         for col_idx, key, label, icon in _view_map:
@@ -642,13 +639,21 @@ def main():
             st.rerun()
 
         # ── 紧凑状态栏 ──────────────────────────────────────────
-        # 重新读取 active_view（rerun 后会刷新）
         active_view = st.session_state.get("active_view", "overview")
+        _jobs = get_jobs(st.session_state)
+        _name_map = {"expectation": "预期差", "trend": "趋势解读", "fundamentals": "基本面"}
+
+        def _job_one_liner(key):
+            """从后台任务提取最新一条进度消息，作为一句话摘要"""
+            job = _jobs.get(key, {})
+            progress = job.get("progress", [])
+            if progress:
+                return progress[-1]
+            return "启动中…"
 
         if stock_ready and (any(analyses.get(k) for k in core_keys)
                            or any(is_running(st.session_state, k) for k in core_keys)):
             _status_parts = []
-            _name_map = {"expectation": "预期差", "trend": "趋势", "fundamentals": "基本面"}
             for k in core_keys:
                 if analyses.get(k):
                     _status_parts.append(f"✅ {_name_map[k]}")
@@ -680,10 +685,10 @@ def main():
             st.info("请在上方输入股票代码/名称，点击「🚀 一键分析」开始")
         else:
             # ════════════════════════════════════════════════════════
-            # overview 视图
+            # overview 视图（基本指标 + 实时进度 + 雷达）
             # ════════════════════════════════════════════════════════
             if active_view == "overview":
-                _show_stock_overview()
+                _show_stock_overview_basic()
                 st.markdown("---")
 
                 # 共享缓存检查（仅无分析结果时）
@@ -697,7 +702,7 @@ def main():
                         for sh in shared_list:
                             ts_short = sh["timestamp"][11:16]
                             keys_str = "、".join({
-                                "expectation": "预期差", "trend": "趋势",
+                                "expectation": "预期差", "trend": "趋势解读",
                                 "fundamentals": "基本面", "sentiment": "舆情",
                                 "sector": "板块", "holders": "股东",
                             }.get(k, k) for k in sh["analyses_keys"])
@@ -731,6 +736,16 @@ def main():
   ⚠️ <strong>AI 模型暂不可用</strong>：{ai_err}，请在左侧切换其他模型。
 </div>""", unsafe_allow_html=True)
 
+                # overview 中显示各模块一句话实时进度（分析中时）
+                _any_core_running = any(is_running(st.session_state, k) for k in core_keys)
+                if _any_core_running:
+                    for k in core_keys:
+                        if is_running(st.session_state, k):
+                            _liner = _job_one_liner(k)
+                            st.caption(f"⏳ **{_name_map[k]}**: {_liner}")
+                        elif analyses.get(k):
+                            st.caption(f"✅ **{_name_map[k]}**: 分析完成，点击上方按钮查看详情")
+
                 # 价值投机雷达（核心三项完成后）
                 if core_all_done:
                     from ui.results import render_radar_section
@@ -740,7 +755,15 @@ def main():
             # expectation 视图（预期差 + 深度舆情）
             # ════════════════════════════════════════════════════════
             elif active_view == "expectation":
-                _show_analysis_result("expectation", "预期差分析", "🔍")
+                if is_running(st.session_state, "expectation"):
+                    _show_job_progress("expectation", "预期差分析")
+                elif analyses.get("expectation"):
+                    name = st.session_state.get("stock_name", "")
+                    st.markdown(f"#### 🔍 {name} · 预期差分析结果")
+                    with st.container(border=True):
+                        st.markdown(analyses["expectation"])
+                else:
+                    st.info("预期差分析尚未执行，点击上方按钮开始分析")
                 # 深度舆情追加
                 if analyses.get("sentiment"):
                     st.markdown("---")
@@ -749,13 +772,32 @@ def main():
                     with st.container(border=True):
                         st.markdown(analyses["sentiment"])
                 elif is_running(st.session_state, "sentiment"):
-                    st.caption("⏳ 舆情分析进行中…")
+                    _show_job_progress("sentiment", "舆情情绪分析")
 
             # ════════════════════════════════════════════════════════
-            # trend 视图（趋势 + K线匹配）
+            # trend 视图（K线图 + 趋势解读 + K线匹配）
             # ════════════════════════════════════════════════════════
             elif active_view == "trend":
-                _show_analysis_result("trend", "K线趋势研判", "📈")
+                # K线图（从 overview 移过来）
+                import pandas as pd
+                from ui.charts import render_kline
+                _t_name = st.session_state.get("stock_name", "")
+                _t_code = st.session_state.get("stock_code", "")
+                _t_df = st.session_state.get("price_df", pd.DataFrame())
+                if not _t_df.empty:
+                    render_kline(_t_df, _t_name, _t_code)
+                    st.markdown("---")
+
+                # 趋势分析结果
+                if is_running(st.session_state, "trend"):
+                    _show_job_progress("trend", "趋势解读分析")
+                elif analyses.get("trend"):
+                    st.markdown(f"#### 📈 {_t_name} · 趋势解读结果")
+                    with st.container(border=True):
+                        st.markdown(analyses["trend"])
+                else:
+                    st.info("趋势解读尚未执行，点击上方按钮开始分析")
+
                 # K线匹配：深度分析触发 _auto_sim 或已有缓存
                 if (st.session_state.get("_auto_sim")
                         or st.session_state.get("similarity_results")):
@@ -766,28 +808,45 @@ def main():
                     )
 
             # ════════════════════════════════════════════════════════
-            # fundamentals 视图（基本面 + 板块 + 股东）
+            # fundamentals 视图（估值分位 + 基本面 + 板块 + 股东）
             # ════════════════════════════════════════════════════════
             elif active_view == "fundamentals":
-                _show_analysis_result("fundamentals", "基本面分析", "📋")
+                # 估值历史分位图（从 overview 移过来）
+                import pandas as pd
+                from ui.charts import render_valuation_bands
+                _f_name = st.session_state.get("stock_name", "")
+                _f_val_df = st.session_state.get("valuation_df", pd.DataFrame())
+                if not _f_val_df.empty:
+                    st.markdown(f"#### 📊 {_f_name} · 估值历史分位")
+                    render_valuation_bands(_f_val_df, _f_name)
+                    st.markdown("---")
+
+                # 基本面分析结果
+                if is_running(st.session_state, "fundamentals"):
+                    _show_job_progress("fundamentals", "基本面分析")
+                elif analyses.get("fundamentals"):
+                    st.markdown(f"#### 📋 {_f_name} · 基本面分析结果")
+                    with st.container(border=True):
+                        st.markdown(analyses["fundamentals"])
+                else:
+                    st.info("基本面分析尚未执行，点击上方按钮开始分析")
+
                 # 深度板块追加
                 if analyses.get("sector"):
                     st.markdown("---")
-                    name = st.session_state.get("stock_name", "")
-                    st.markdown(f"#### 🏭 {name} · 板块联动分析（深度）")
+                    st.markdown(f"#### 🏭 {_f_name} · 板块联动分析（深度）")
                     with st.container(border=True):
                         st.markdown(analyses["sector"])
                 elif is_running(st.session_state, "sector"):
-                    st.caption("⏳ 板块联动分析进行中…")
+                    _show_job_progress("sector", "板块联动分析")
                 # 深度股东追加
                 if analyses.get("holders"):
                     st.markdown("---")
-                    name = st.session_state.get("stock_name", "")
-                    st.markdown(f"#### 👥 {name} · 股东/机构动向（深度）")
+                    st.markdown(f"#### 👥 {_f_name} · 股东/机构动向（深度）")
                     with st.container(border=True):
                         st.markdown(analyses["holders"])
                 elif is_running(st.session_state, "holders"):
-                    st.caption("⏳ 股东/机构动向分析进行中…")
+                    _show_job_progress("holders", "股东/机构动向分析")
 
             # ── 邮件推送（所有视图共享）──────────────────────────
             if email_addr and analyses and not any_running(st.session_state):
@@ -1299,11 +1358,8 @@ def _format_info_for_ai(info: dict) -> str:
     return "\n".join(parts) if parts else "- 数据暂无"
 
 
-def _show_stock_overview():
-    """显示股票概览：指标卡片 + K线图 + 估值分位图"""
-    import pandas as pd
-    from ui.charts import render_kline, render_valuation_bands
-
+def _show_stock_overview_basic():
+    """显示股票概览：仅指标卡片（K线图移至趋势视图，估值分位移至基本面视图）"""
     name = st.session_state["stock_name"]
     ts_code = st.session_state["stock_code"]
     info = st.session_state.get("stock_info", {})
@@ -1323,17 +1379,6 @@ def _show_stock_overview():
     r2 = st.columns(3)
     for col, (label, val) in zip(r2, metrics[3:]):
         with col: st.metric(label, str(val)[:14])
-
-    df = st.session_state.get("price_df", pd.DataFrame())
-    if not df.empty:
-        st.markdown("---")
-        render_kline(df, name, ts_code)
-
-    # 估值历史分位图
-    val_df = st.session_state.get("valuation_df", pd.DataFrame())
-    if not val_df.empty:
-        st.markdown(f"#### 📊 {name} · 估值历史分位")
-        render_valuation_bands(val_df, name)
 
 
 def _show_mystic(client, cfg, model_name):
