@@ -465,32 +465,38 @@ hr { border-color: var(--border) !important; margin: 1rem 0 !important; }
     width: 100% !important;
   }
 
-  /* 操作按钮行：横排可滚动，与 Tab 栏同风格 */
+  /* 操作按钮行：横排不换行，所有按钮一行可见 */
   [data-testid="stHorizontalBlock"]:has(.stButton) {
     display: flex !important;
     flex-direction: row !important;
     flex-wrap: nowrap !important;
-    overflow-x: auto !important;
-    -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
-    border-radius: 12px !important;
-    padding: 3px !important;
-    gap: 1px !important;
-    width: auto !important;
+    border-radius: 30px !important;
+    padding: 2px !important;
+    gap: 0 !important;
+    width: 100% !important;
+    margin-left: 0 !important;
+    border: 1px solid var(--border) !important;
+  }
+  [data-testid="stHorizontalBlock"]:has(.stButton)::before {
+    display: none !important;
   }
   [data-testid="stHorizontalBlock"]:has(.stButton)::-webkit-scrollbar {
     display: none;
   }
   [data-testid="stHorizontalBlock"]:has(.stButton) > div[data-testid="column"],
   [data-testid="stHorizontalBlock"]:has(.stButton) > div {
-    flex: 0 0 auto !important;
+    flex: 1 1 0 !important;
     min-width: 0 !important;
-    width: auto !important;
+    width: 0 !important;
   }
   [data-testid="stHorizontalBlock"]:has(.stButton) .stButton button {
-    font-size: 0.75rem !important;
-    padding: 5px 10px !important;
+    font-size: 0.72rem !important;
+    padding: 5px 4px !important;
     border-radius: 50px !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
   }
 
   /* 指标卡片：每行2个 */
@@ -570,21 +576,9 @@ hr { border-color: var(--border) !important; margin: 1rem 0 !important; }
     min-width: 100% !important;
   }
   /* 按钮更紧凑但保持横排 */
-  [data-testid="stHorizontalBlock"]:has(.stButton) {
-    display: flex !important;
-    flex-direction: row !important;
-    flex-wrap: nowrap !important;
-    margin-left: 8px !important;
-  }
-  [data-testid="stHorizontalBlock"]:has(.stButton) > div[data-testid="column"],
-  [data-testid="stHorizontalBlock"]:has(.stButton) > div {
-    flex: 0 0 auto !important;
-    min-width: 0 !important;
-    width: auto !important;
-  }
   [data-testid="stHorizontalBlock"]:has(.stButton) .stButton button {
-    font-size: 0.68rem !important;
-    padding: 4px 7px !important;
+    font-size: 0.65rem !important;
+    padding: 4px 2px !important;
   }
 }
 </style>

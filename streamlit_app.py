@@ -620,15 +620,15 @@ def main():
             _any_core_running = any(is_running(st.session_state, k) for k in core_keys)
             if _any_core_running:
                 # 分析进行中 → 禁用按钮
-                st.button("⏳ 分析中…", type=_btn_type_all, disabled=True,
+                st.button("⏳ 分析中", type=_btn_type_all, disabled=True,
                           use_container_width=True, key="btn_all")
             elif core_all_started:
-                if st.button("✅ 一键分析", type=_btn_type_all,
+                if st.button("✅ 一键", type=_btn_type_all,
                              use_container_width=True, key="btn_all"):
                     st.session_state["active_view"] = "overview"
-                    need_rerun = True
+                    st.rerun()
             else:
-                if st.button("🚀 一键分析", type=_btn_type_all,
+                if st.button("🚀 一键", type=_btn_type_all,
                              use_container_width=True, key="btn_all"):
                     if not query:
                         st.toast("请先输入股票代码或名称")
@@ -650,7 +650,7 @@ def main():
         # Col 1-3: 核心三项按钮（同时充当标签页切换）
         _view_map = [
             (1, "expectation", "预期差", "🔍"),
-            (2, "trend", "趋势解读", "📈"),
+            (2, "trend", "趋势", "📈"),
             (3, "fundamentals", "基本面", "📋"),
         ]
         for col_idx, key, label, icon in _view_map:
@@ -685,17 +685,17 @@ def main():
         # Col 4: 🔬 深度分析
         with _action_cols[4]:
             if deep_any_running:
-                st.button("⏳ 深度分析中…", disabled=True,
+                st.button("⏳ 深度中", disabled=True,
                           use_container_width=True, key="btn_deep")
             elif deep_all_done:
-                st.button("✅ 深度已完成", disabled=True,
+                st.button("✅ 深度", disabled=True,
                           use_container_width=True, key="btn_deep")
             elif not core_all_done:
-                st.button("🔬 深度分析", disabled=True,
+                st.button("🔬 深度", disabled=True,
                           use_container_width=True, key="btn_deep",
                           help="完成核心三项分析后可用")
             else:
-                if st.button("🔬 深度分析", use_container_width=True,
+                if st.button("🔬 深度", use_container_width=True,
                              key="btn_deep"):
                     if client:
                         for dk in deep_keys:
