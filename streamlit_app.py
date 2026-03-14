@@ -1076,6 +1076,7 @@ def main():
             _moe_name = st.session_state.get("stock_name", "")
             st.markdown(f"#### 🎯 {_moe_name} · 六方会谈")
 
+            moe_done = st.session_state.get("moe_results", {}).get("done", False)
             if is_running(st.session_state, "moe"):
                 _show_job_progress("moe", "六方会谈辩论")
             elif moe_done:
