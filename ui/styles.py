@@ -197,7 +197,7 @@ html, body, [data-testid="stAppViewContainer"] {
   box-shadow: 0 6px 20px rgba(99,102,241,0.4) !important;
 }
 
-/* 操作按钮行：模仿 Tab 栏风格（桌面+手机通用） */
+/* 操作按钮行：模仿 Tab 栏风格，作为子导航层级 */
 [data-testid="stHorizontalBlock"]:has(.stButton) {
   background: var(--bg-card) !important;
   border: 1px solid var(--border) !important;
@@ -206,6 +206,20 @@ html, body, [data-testid="stAppViewContainer"] {
   gap: 2px !important;
   box-shadow: var(--shadow) !important;
   width: fit-content !important;
+  margin-left: 12px !important;
+  position: relative;
+}
+/* 左侧小竖线：视觉上体现子级关系 */
+[data-testid="stHorizontalBlock"]:has(.stButton)::before {
+  content: "";
+  position: absolute;
+  left: -8px;
+  top: 25%;
+  height: 50%;
+  width: 3px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, var(--blue), var(--purple));
+  opacity: 0.5;
 }
 [data-testid="stHorizontalBlock"]:has(.stButton) .stButton button {
   border-radius: 50px !important;
@@ -453,6 +467,8 @@ hr { border-color: var(--border) !important; margin: 1rem 0 !important; }
 
   /* 操作按钮行：横排可滚动，与 Tab 栏同风格 */
   [data-testid="stHorizontalBlock"]:has(.stButton) {
+    display: flex !important;
+    flex-direction: row !important;
     flex-wrap: nowrap !important;
     overflow-x: auto !important;
     -webkit-overflow-scrolling: touch;
@@ -460,12 +476,14 @@ hr { border-color: var(--border) !important; margin: 1rem 0 !important; }
     border-radius: 12px !important;
     padding: 3px !important;
     gap: 1px !important;
+    width: auto !important;
   }
   [data-testid="stHorizontalBlock"]:has(.stButton)::-webkit-scrollbar {
     display: none;
   }
-  [data-testid="stHorizontalBlock"]:has(.stButton) > div[data-testid="column"] {
-    flex: 1 1 auto !important;
+  [data-testid="stHorizontalBlock"]:has(.stButton) > div[data-testid="column"],
+  [data-testid="stHorizontalBlock"]:has(.stButton) > div {
+    flex: 0 0 auto !important;
     min-width: 0 !important;
     width: auto !important;
   }
@@ -552,6 +570,18 @@ hr { border-color: var(--border) !important; margin: 1rem 0 !important; }
     min-width: 100% !important;
   }
   /* 按钮更紧凑但保持横排 */
+  [data-testid="stHorizontalBlock"]:has(.stButton) {
+    display: flex !important;
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
+    margin-left: 8px !important;
+  }
+  [data-testid="stHorizontalBlock"]:has(.stButton) > div[data-testid="column"],
+  [data-testid="stHorizontalBlock"]:has(.stButton) > div {
+    flex: 0 0 auto !important;
+    min-width: 0 !important;
+    width: auto !important;
+  }
   [data-testid="stHorizontalBlock"]:has(.stButton) .stButton button {
     font-size: 0.68rem !important;
     padding: 4px 7px !important;
