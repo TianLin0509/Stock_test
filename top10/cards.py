@@ -87,11 +87,11 @@ def _render_cards(df: pd.DataFrame, max_cards: int = 10, key_prefix: str = "all"
                 return ""
             pct = min(val * 10, 100)
             return (
-                f'<div style="display:flex;align-items:center;gap:6px;margin-top:2px;">'
-                f'<span style="font-size:0.75rem;color:#6b7280;min-width:56px;">{label}</span>'
-                f'<div style="flex:1;background:#f1f5f9;border-radius:4px;height:8px;overflow:hidden;">'
+                f'<div style="display:flex;align-items:center;gap:4px;margin-top:2px;">'
+                f'<span style="font-size:0.7rem;color:#6b7280;min-width:40px;">{label}</span>'
+                f'<div style="flex:1;background:#f1f5f9;border-radius:4px;height:7px;overflow:hidden;">'
                 f'<div style="width:{pct}%;background:{color};height:100%;border-radius:4px;"></div></div>'
-                f'<span style="font-size:0.75rem;color:#374151;min-width:28px;text-align:right;">{val:.0f}</span>'
+                f'<span style="font-size:0.7rem;color:#374151;min-width:20px;text-align:right;">{val:.0f}</span>'
                 f'</div>'
             )
 
@@ -115,16 +115,16 @@ def _render_cards(df: pd.DataFrame, max_cards: int = 10, key_prefix: str = "all"
 
         # 整张卡片 HTML（无缩进，避免 Streamlit markdown 把缩进当代码块）
         card_html = (
-            f'<div style="background:#fff;border:2px solid {border_color};border-radius:16px;'
-            f'padding:1rem 1.2rem;margin:0.4rem 0;box-shadow:0 2px 12px rgba(0,0,0,0.06);">'
-            f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.4rem;">'
-            f'<div>'
-            f'<span style="font-size:1.2rem;font-weight:800;color:#1e1b4b;">#{i} {name}</span>'
-            f'<span style="font-size:0.82rem;color:#6b7280;margin-left:8px;">{code}</span>'
+            f'<div style="background:#fff;border:2px solid {border_color};border-radius:12px;'
+            f'padding:0.7rem 0.9rem;margin:0.3rem 0;box-shadow:0 2px 8px rgba(0,0,0,0.05);">'
+            f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.3rem;">'
+            f'<div style="min-width:0;overflow:hidden;">'
+            f'<span style="font-size:1.05rem;font-weight:800;color:#1e1b4b;">#{i} {name}</span>'
+            f'<span style="font-size:0.78rem;color:#6b7280;margin-left:6px;">{code}</span>'
             f'{industry_html}</div>'
-            f'<div style="background:{badge_bg};color:{badge_color};border-radius:50px;padding:4px 14px;'
-            f'font-weight:800;font-size:1rem;">{score}/10</div></div>'
-            f'<div style="display:flex;gap:16px;align-items:center;font-size:0.85rem;color:#6b7280;flex-wrap:wrap;">'
+            f'<div style="background:{badge_bg};color:{badge_color};border-radius:50px;padding:3px 10px;'
+            f'font-weight:800;font-size:0.9rem;flex-shrink:0;">{score}/10</div></div>'
+            f'<div style="display:flex;gap:8px;align-items:center;font-size:0.8rem;color:#6b7280;flex-wrap:wrap;">'
             f'<span>💰 {price_str}元</span>'
             f'<span style="color:{change_color};font-weight:600;">{change_str}%</span>'
             f'{advice_html}{mid_html}</div>'

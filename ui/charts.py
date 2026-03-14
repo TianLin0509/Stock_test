@@ -314,7 +314,7 @@ def render_radar(signal: dict) -> None:
         template="plotly_white",
         height=320, autosize=True,
         paper_bgcolor=_PAPER,
-        margin=dict(t=30, b=10, l=60, r=60),
+        margin=dict(t=30, b=10, l=30, r=30),
         legend=dict(
             orientation="h", y=-0.05, x=0.5, xanchor="center",
             font=dict(size=10, color=_TEXT),

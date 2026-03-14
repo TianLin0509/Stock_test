@@ -499,6 +499,42 @@ hr { border-color: var(--border) !important; margin: 1rem 0 !important; }
     text-overflow: ellipsis !important;
   }
 
+  /* st.status 折叠态：强制横排不换行 */
+  [data-testid="stStatusWidget"] {
+    max-width: 100% !important;
+  }
+  [data-testid="stStatusWidget"] label {
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    font-size: 0.78rem !important;
+  }
+
+  /* 雷达图+评分条：手机端改为竖排 */
+  [data-testid="stHorizontalBlock"]:has([data-testid="stPlotlyChart"]) {
+    flex-direction: column !important;
+  }
+  [data-testid="stHorizontalBlock"]:has([data-testid="stPlotlyChart"]) > div[data-testid="column"] {
+    flex: 1 1 100% !important;
+    min-width: 100% !important;
+  }
+
+  /* 图表 margins 缩小 */
+  .js-plotly-plot .plotly .main-svg {
+    max-width: 100% !important;
+  }
+
+  /* Top10 卡片紧凑化 */
+  .top10-card, [style*="border-radius: 16px"][style*="padding: 1rem"] {
+    padding: 0.6rem 0.8rem !important;
+  }
+
+  /* caption 状态栏：紧凑 */
+  [data-testid="stCaptionContainer"] {
+    font-size: 0.72rem !important;
+    line-height: 1.4 !important;
+  }
+
   /* 指标卡片：每行2个 */
   [data-testid="stHorizontalBlock"]:has([data-testid="metric-container"]) > div[data-testid="column"] {
     flex: 1 1 46% !important;

@@ -540,8 +540,7 @@ def main():
         st.session_state["stock_name"] = name
         data_errors = []
 
-        with st.status(f"📥 正在获取 {name} 的核心数据...", expanded=True) as s:
-            st.write("▶ 并行获取基本信息、K线、财务、估值数据...")
+        with st.spinner(f"📥 正在获取 {name} 的核心数据..."):
             from concurrent.futures import ThreadPoolExecutor, as_completed
             _fetch_map = {
                 "info": lambda: get_basic_info(ts_code),
@@ -553,8 +552,7 @@ def main():
             with ThreadPoolExecutor(max_workers=4) as _pool:
                 _futs = {_pool.submit(fn): key for key, fn in _fetch_map.items()}
                 for fut in as_completed(_futs):
-                    key = _futs[fut]
-                    _fetch_results[key] = fut.result()
+                    _fetch_results[_futs[fut]] = fut.result()
 
             info, e = _fetch_results["info"]
             if e: data_errors.append(e)
@@ -571,7 +569,6 @@ def main():
             val_df, e = _fetch_results["val"]
             if e: data_errors.append(e)
             st.session_state["valuation_df"] = val_df
-            s.update(label="✅ 核心数据获取完成！", state="complete")
 
         if data_errors:
             st.markdown(f"""<div class="status-banner warn">
@@ -708,44 +705,30 @@ def main():
         # ── 紧凑状态栏 ──────────────────────────────────────────
         active_view = st.session_state.get("active_view", "overview")
         _jobs = get_jobs(st.session_state)
-        _name_map = {"expectation": "预期差", "trend": "趋势解读", "fundamentals": "基本面"}
-
-        def _job_one_liner(key):
-            """从后台任务提取最新一条进度消息，作为一句话摘要"""
-            job = _jobs.get(key, {})
-            progress = job.get("progress", [])
-            if progress:
-                return progress[-1]
-            return "启动中…"
+        _name_map = {"expectation": "预期差", "trend": "趋势", "fundamentals": "基本面"}
 
         if stock_ready and (any(analyses.get(k) for k in core_keys)
                            or any(is_running(st.session_state, k) for k in core_keys)):
             _status_parts = []
             for k in core_keys:
                 if analyses.get(k):
-                    _status_parts.append(f"✅ {_name_map[k]}")
+                    _status_parts.append(f"✅{_name_map[k]}")
                 elif is_running(st.session_state, k):
-                    _liner = _job_one_liner(k)
-                    _status_parts.append(f"⏳ {_name_map[k]}: {_liner}")
+                    _status_parts.append(f"⏳{_name_map[k]}")
                 else:
-                    _status_parts.append(f"⬜ {_name_map[k]}")
-            _status_line = " &nbsp;|&nbsp; ".join(_status_parts)
+                    _status_parts.append(f"⬜{_name_map[k]}")
 
             # 深度分析状态
+            _deep_map = {"sentiment": "舆情", "sector": "板块", "holders": "股东"}
             if deep_any_running or any(analyses.get(k) for k in deep_keys):
-                _deep_parts = []
-                _deep_map = {"sentiment": "舆情", "sector": "板块", "holders": "股东"}
                 for dk in deep_keys:
                     if analyses.get(dk):
-                        _deep_parts.append(f"✅ {_deep_map[dk]}")
+                        _status_parts.append(f"✅{_deep_map[dk]}")
                     elif is_running(st.session_state, dk):
-                        _liner = _job_one_liner(dk)
-                        _deep_parts.append(f"⏳ {_deep_map[dk]}: {_liner}")
-                _deep_line = " &nbsp;|&nbsp; ".join(_deep_parts)
-                if _deep_line:
-                    _status_line += f" &nbsp;&nbsp;🔬 深度: {_deep_line}"
+                        _status_parts.append(f"⏳{_deep_map[dk]}")
 
-            st.caption(_status_line, unsafe_allow_html=True)
+            _status_line = " | ".join(_status_parts)
+            st.caption(_status_line)
 
         st.markdown("---")
 
