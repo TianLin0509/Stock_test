@@ -239,27 +239,7 @@ def render_analysis_tab(client, cfg_now, selected_model, email_addr):
         elif active_view == "summary":
             _render_summary(analyses)
 
-    # ── 邮件推送（所有视图共享）──────────────────────────
-    if email_addr and analyses and not any_running(st.session_state):
-        has_any = any(analyses.get(k) for k in ALL_ANALYSIS_KEYS)
-        if has_any:
-            st.markdown("---")
-            if st.button("📧 发送分析报告到邮箱", key="send_email"):
-                with st.spinner("正在发送..."):
-                    from utils.email_sender import send_analysis_email
-                    ok, msg = send_analysis_email(
-                        email_addr,
-                        st.session_state.get("stock_name", ""),
-                        to_code6(st.session_state.get("stock_code", "")),
-                        st.session_state.get("stock_info", {}),
-                        analyses,
-                        st.session_state.get("moe_results", {}),
-                        st.session_state.get("selected_model", ""),
-                    )
-                    if ok:
-                        st.success(f"✅ 已发送至 {email_addr}")
-                    else:
-                        st.error(msg)
+    # 邮件推送已移至总结视图内
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -505,3 +485,24 @@ def _render_summary(analyses):
         conclusion = _extract_conclusion(text)
         with st.expander(title, expanded=True):
             st.markdown(conclusion)
+
+    # ── 邮件推送（小按钮）──
+    email_addr = st.session_state.get("email_input", "")
+    if email_addr and not any_running(st.session_state):
+        st.markdown("---")
+        if st.button("📧 发送报告到邮箱", key="send_email"):
+            with st.spinner("正在发送..."):
+                from utils.email_sender import send_analysis_email
+                ok, msg = send_analysis_email(
+                    email_addr,
+                    name,
+                    to_code6(ts_code),
+                    st.session_state.get("stock_info", {}),
+                    analyses,
+                    st.session_state.get("moe_results", {}),
+                    st.session_state.get("selected_model", ""),
+                )
+                if ok:
+                    st.success(f"✅ 已发送至 {email_addr}")
+                else:
+                    st.error(msg)
