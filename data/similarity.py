@@ -231,11 +231,14 @@ def find_similar(
 
     all_candidates = []
 
+    # ── 预过滤：排除 pct_chg 标准差差异 > 2x 的股票（Phase 3.2）──────
+    target_pct_std = target_feats["pct_chg"].std()
+
     # ── 按股票分组搜索 ────────────────────────────────────────────────────
     groups = list(history.groupby("ts_code"))
     total_stocks = len(groups)
     for idx_stock, (code, group) in enumerate(groups):
-        if progress_callback and idx_stock % 50 == 0:
+        if progress_callback and idx_stock % 200 == 0:
             progress_callback(idx_stock, total_stocks)
         if code == exclude_code:
             continue
@@ -244,6 +247,13 @@ def find_similar(
 
         if len(grp) < k_days + context_days:
             continue
+
+        # 预过滤：pct_chg 标准差差异太大的直接跳过
+        stock_pct_std = grp["pct_chg"].std()
+        if target_pct_std > 0 and stock_pct_std > 0:
+            ratio = max(stock_pct_std, target_pct_std) / min(stock_pct_std, target_pct_std)
+            if ratio > 2.0:
+                continue
 
         dates = grp["trade_date"].values
 

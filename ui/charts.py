@@ -33,10 +33,20 @@ _TGT_DOWN = "#4169e1"   # 目标跌 — 皇家蓝
 
 
 def render_kline(df: pd.DataFrame, name: str, ts_code: str) -> None:
-    """主页 K 线图（浅色风格）"""
+    """主页 K 线图（浅色风格），缓存到 session_state"""
     if df.empty:
         st.warning("暂无K线数据")
         return
+
+    # 图表缓存：相同股票+数据量 → 复用 figure 对象
+    cache_key = f"_fig_kline_{ts_code}_{len(df)}"
+    fig_cached = st.session_state.get(cache_key)
+    if fig_cached is not None:
+        st.plotly_chart(fig_cached, use_container_width=True,
+                        config={"displayModeBar": False, "responsive": True,
+                                "scrollZoom": False})
+        return
+
     d = df.copy()
     d = d.reset_index(drop=True)
     x_idx = list(range(len(d)))
@@ -73,6 +83,7 @@ def render_kline(df: pd.DataFrame, name: str, ts_code: str) -> None:
 
     _apply_layout(fig, f"{name}（{to_code6(ts_code)}）日K线", 440,
                   tick_vals, tick_text, show_legend=True)
+    st.session_state[cache_key] = fig
     st.plotly_chart(fig, use_container_width=True,
                     config={"displayModeBar": False, "responsive": True,
                             "scrollZoom": False})
@@ -331,12 +342,14 @@ def render_radar(signal: dict) -> None:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def render_valuation_bands(val_df: pd.DataFrame, name: str) -> None:
-    """渲染 PE/PB 历史分位图 — 面积图 + 当前值标记"""
+    """渲染 PE/PB 历史分位图 — 面积图 + 当前值标记，缓存到 session_state"""
     if val_df.empty:
         st.info("暂无历史估值数据")
         return
 
     df = val_df.copy()
+    # 估值图缓存 key
+    _val_cache_prefix = f"_fig_val_{name}_{len(val_df)}"
     # 确保有日期列
     date_col = "trade_date" if "trade_date" in df.columns else df.columns[0]
     df["date_str"] = df[date_col].astype(str)
@@ -355,6 +368,25 @@ def render_valuation_bands(val_df: pd.DataFrame, name: str) -> None:
 
     for tab, (col, label, color) in zip(tabs, metrics):
         with tab:
+            # 检查缓存
+            _vcache_key = f"{_val_cache_prefix}_{col}"
+            _vcached = st.session_state.get(_vcache_key)
+            if _vcached is not None:
+                c1, c2, c3 = st.columns(3)
+                with c1: st.metric(f"当前{label}", _vcached["current"])
+                with c2: st.metric("历史分位", _vcached["percentile"])
+                with c3:
+                    st.markdown(
+                        f'<div style="text-align:center;padding-top:0.4rem;">'
+                        f'<span style="font-size:0.72rem;color:#9ca3af;">估值状态</span><br>'
+                        f'<span style="font-size:1.15rem;font-weight:800;color:{_vcached["status_color"]};">'
+                        f'{_vcached["status"]}</span></div>',
+                        unsafe_allow_html=True,
+                    )
+                st.plotly_chart(_vcached["fig"], use_container_width=True,
+                                config={"displayModeBar": False, "responsive": True})
+                continue
+
             series = df[col].dropna()
             if len(series) < 50:
                 st.info(f"{label} 数据不足")
@@ -471,6 +503,14 @@ def render_valuation_bands(val_df: pd.DataFrame, name: str) -> None:
                 ),
             )
 
+            # 缓存到 session_state
+            st.session_state[_vcache_key] = {
+                "fig": fig,
+                "current": f"{current_val:.2f}",
+                "percentile": f"{percentile:.0f}%",
+                "status": status,
+                "status_color": status_color,
+            }
             st.plotly_chart(fig, use_container_width=True,
                             config={"displayModeBar": False, "responsive": True})
 

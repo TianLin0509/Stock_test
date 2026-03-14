@@ -152,17 +152,31 @@ def start_analysis(session_state, key: str, client, cfg, model_name: str):
     else:
         return
 
+    import time as _time
     thread = threading.Thread(target=target, args=args, daemon=True)
     job["status"] = "running"
+    job["_started_at"] = _time.time()
     thread.start()
     job["_thread"] = thread
 
 
 def collect_result(session_state, key: str):
-    """如果后台任务完成，将结果写入 analyses（主线程调用）"""
+    """如果后台任务完成，将结果写入 analyses（主线程调用）
+    包含超时保护：running 超过 5 分钟自动标记失败。
+    """
+    import time as _time
     jobs = get_jobs(session_state)
     job = jobs.get(key)
-    if not job or job["status"] != "done":
+    if not job:
+        return
+
+    # 超时保护：5 分钟
+    if job["status"] == "running" and _time.time() - job.get("_started_at", 0) > 300:
+        job["status"] = "done"
+        job["error"] = "分析超时"
+        job["result"] = "⚠️ AI 未在 5 分钟内响应，请切换模型重试。"
+
+    if job["status"] != "done":
         return
 
     if key == "moe":

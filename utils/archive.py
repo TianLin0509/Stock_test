@@ -258,12 +258,10 @@ def get_archive_stats() -> dict:
 # ── 缓存查询（替代 shared_cache）─────────────────────────────────────
 
 def _get_cutoff() -> float:
-    """获取当前周期的起始时间戳（以每天19:00北京时间为分界）
-    - 19:00之前：cutoff = 昨天19:00
-    - 19:00之后：cutoff = 今天19:00
-    """
+    """获取当前周期的起始时间戳（以每天 ARCHIVE_CUTOFF_HOUR 为分界）"""
+    from config import ARCHIVE_CUTOFF_HOUR
     now = datetime.now()
-    today_7pm = now.replace(hour=19, minute=0, second=0, microsecond=0)
+    today_7pm = now.replace(hour=ARCHIVE_CUTOFF_HOUR, minute=0, second=0, microsecond=0)
     if now >= today_7pm:
         return today_7pm.timestamp()
     else:

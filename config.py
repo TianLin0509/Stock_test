@@ -1,6 +1,15 @@
-"""模型配置 — 所有 API Key 从 Streamlit Secrets 读取"""
+"""模型配置 + 全局常量 — 所有 API Key 从 Streamlit Secrets 读取"""
 
 import streamlit as st
+
+# ── 全局常量 ──────────────────────────────────────────────────────────────
+ADMIN_USERNAME = "LT"
+ARCHIVE_CUTOFF_HOUR = 19
+POLL_INTERVAL = 0.3
+POLL_INTERVAL_IDLE = 1.5          # 无流式内容时的轮询间隔
+CORE_KEYS = ["expectation", "trend", "fundamentals"]
+DEEP_KEYS = ["sentiment", "sector", "holders"]
+ALL_ANALYSIS_KEYS = CORE_KEYS + DEEP_KEYS
 
 MODEL_CONFIGS = {
     "🟠 Qwen · 通义千问": {
