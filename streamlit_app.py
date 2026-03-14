@@ -515,10 +515,10 @@ def main():
                 key="query_input",
             )
         with _go_col:
-            _go_clicked = st.button("▶ 一键分析", type="primary",
+            _go_clicked = st.button("🚀 一键分析", type="secondary",
                                      use_container_width=True, key="btn_go")
         with _reset_col:
-            _reset_clicked = st.button("↻ 重置", type="secondary",
+            _reset_clicked = st.button("🔄 重置", type="secondary",
                                         use_container_width=True, key="btn_reset")
 
         _auto_search = bool(_top10_pick)
