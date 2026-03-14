@@ -86,13 +86,14 @@ def _render_cards(df: pd.DataFrame, max_cards: int = 10, key_prefix: str = "all"
             if val is None or (isinstance(val, float) and math.isnan(val)):
                 return ""
             pct = min(val * 10, 100)
-            return f"""<div style="display:flex; align-items:center; gap:6px; margin-top:2px;">
-                <span style="font-size:0.75rem; color:#6b7280; min-width:56px;">{label}</span>
-                <div style="flex:1; background:#f1f5f9; border-radius:4px; height:8px; overflow:hidden;">
-                    <div style="width:{pct}%; background:{color}; height:100%; border-radius:4px;"></div>
-                </div>
-                <span style="font-size:0.75rem; color:#374151; min-width:28px; text-align:right;">{val:.0f}</span>
-            </div>"""
+            return (
+                f'<div style="display:flex;align-items:center;gap:6px;margin-top:2px;">'
+                f'<span style="font-size:0.75rem;color:#6b7280;min-width:56px;">{label}</span>'
+                f'<div style="flex:1;background:#f1f5f9;border-radius:4px;height:8px;overflow:hidden;">'
+                f'<div style="width:{pct}%;background:{color};height:100%;border-radius:4px;"></div></div>'
+                f'<span style="font-size:0.75rem;color:#374151;min-width:28px;text-align:right;">{val:.0f}</span>'
+                f'</div>'
+            )
 
         sub_bars = _bar("基本面", s_fund, "#3b82f6") + _bar("题材", s_theme, "#f59e0b") + _bar("技术面", s_tech, "#22c55e")
 
@@ -102,44 +103,34 @@ def _render_cards(df: pd.DataFrame, max_cards: int = 10, key_prefix: str = "all"
         quant_html = ""
         if quant_total and not (isinstance(quant_total, float) and math.isnan(quant_total)):
             q_color = "#16a34a" if quant_total >= 65 else "#f59e0b" if quant_total >= 50 else "#ef4444"
-            quant_html = f"""<div style="margin-top:6px; display:flex; align-items:center; gap:8px;">
-                <span style="font-size:0.72rem; color:#6b7280;">量化预评分</span>
-                <span style="background:{q_color}15; color:{q_color}; border-radius:4px;
-                    padding:1px 8px; font-size:0.72rem; font-weight:700;">{int(quant_total)}/100 {quant_signal}</span>
-            </div>"""
+            quant_html = (
+                f'<div style="margin-top:6px;display:flex;align-items:center;gap:8px;">'
+                f'<span style="font-size:0.72rem;color:#6b7280;">量化预评分</span>'
+                f'<span style="background:{q_color}15;color:{q_color};border-radius:4px;'
+                f'padding:1px 8px;font-size:0.72rem;font-weight:700;">{int(quant_total)}/100 {quant_signal}</span>'
+                f'</div>'
+            )
 
         sub_section = f'<div style="margin-top:8px;">{sub_bars}{quant_html}</div>' if (sub_bars or quant_html) else ""
 
-        st.markdown(f"""<div style="
-            background: #fff;
-            border: 2px solid {border_color};
-            border-radius: 16px;
-            padding: 1rem 1.2rem;
-            margin: 0.4rem 0;
-            box-shadow: 0 2px 12px rgba(0,0,0,0.06);
-        ">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.4rem;">
-                <div>
-                    <span style="font-size:1.2rem; font-weight:800; color:#1e1b4b;">
-                        #{i} {name}
-                    </span>
-                    <span style="font-size:0.82rem; color:#6b7280; margin-left:8px;">{code}</span>
-                    {industry_html}
-                </div>
-                <div style="
-                    background:{badge_bg}; color:{badge_color};
-                    border-radius:50px; padding:4px 14px;
-                    font-weight:800; font-size:1rem;
-                ">{score}/10</div>
-            </div>
-            <div style="display:flex; gap:16px; align-items:center; font-size:0.85rem; color:#6b7280; flex-wrap:wrap;">
-                <span>💰 {price_str}元</span>
-                <span style="color:{change_color}; font-weight:600;">{change_str}%</span>
-                {advice_html}
-                {mid_html}
-            </div>
-            {sub_section}
-        </div>""", unsafe_allow_html=True)
+        # 整张卡片 HTML（无缩进，避免 Streamlit markdown 把缩进当代码块）
+        card_html = (
+            f'<div style="background:#fff;border:2px solid {border_color};border-radius:16px;'
+            f'padding:1rem 1.2rem;margin:0.4rem 0;box-shadow:0 2px 12px rgba(0,0,0,0.06);">'
+            f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.4rem;">'
+            f'<div>'
+            f'<span style="font-size:1.2rem;font-weight:800;color:#1e1b4b;">#{i} {name}</span>'
+            f'<span style="font-size:0.82rem;color:#6b7280;margin-left:8px;">{code}</span>'
+            f'{industry_html}</div>'
+            f'<div style="background:{badge_bg};color:{badge_color};border-radius:50px;padding:4px 14px;'
+            f'font-weight:800;font-size:1rem;">{score}/10</div></div>'
+            f'<div style="display:flex;gap:16px;align-items:center;font-size:0.85rem;color:#6b7280;flex-wrap:wrap;">'
+            f'<span>💰 {price_str}元</span>'
+            f'<span style="color:{change_color};font-weight:600;">{change_str}%</span>'
+            f'{advice_html}{mid_html}</div>'
+            f'{sub_section}</div>'
+        )
+        st.markdown(card_html, unsafe_allow_html=True)
 
         # "分析此股"按钮
         if st.button(f"🔍 深度分析 {name}", key=f"top10_{key_prefix}_{code}_{i}", use_container_width=True):
