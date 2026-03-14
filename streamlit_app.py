@@ -507,7 +507,7 @@ def main():
         if _top10_pick:
             st.session_state["query_input"] = _top10_pick
 
-        _search_col, _go_col, _reset_col = st.columns([4, 1.5, 1.5])
+        _search_col, _go_col, _reset_col = st.columns([4, 2, 1.5])
         with _search_col:
             query = st.text_input(
                 "搜索股票", label_visibility="collapsed",
@@ -515,10 +515,10 @@ def main():
                 key="query_input",
             )
         with _go_col:
-            _go_clicked = st.button("🚀 分析", type="primary",
+            _go_clicked = st.button("▶ 一键分析", type="primary",
                                      use_container_width=True, key="btn_go")
         with _reset_col:
-            _reset_clicked = st.button("🔄 重置", type="secondary",
+            _reset_clicked = st.button("↻ 重置", type="secondary",
                                         use_container_width=True, key="btn_reset")
 
         _auto_search = bool(_top10_pick)
@@ -531,16 +531,6 @@ def main():
                 if k not in _keep:
                     del st.session_state[k]
             st.rerun()
-
-    # ══════════════════════════════════════════════════════════════════════
-    # Tab 布局
-    # ══════════════════════════════════════════════════════════════════════
-    analyses = st.session_state.get("analyses", {})
-    moe_done = bool(st.session_state.get("moe_results", {}).get("done"))
-
-    tab_analysis, tab_compare, tab_backtest, tab_moe, tab_mystic, tab_qa = st.tabs(
-        ["📊 智能分析", "⚖️ 股票对比", "📈 回测战绩", "🎯 六方会谈", "🔮 趣味玄学", "💬 互动问答"]
-    )
 
     # ══════════════════════════════════════════════════════════════════════
     # 股票解析 + 最少数据获取（由一键分析或各分析按钮触发）
@@ -614,12 +604,50 @@ def main():
     # ══════════════════════════════════════════════════════════════════════
     stock_ready = bool(st.session_state.get("stock_name"))
     client, cfg_now, ai_err = get_ai_client(selected_model)
+    core_keys = ["expectation", "trend", "fundamentals"]
+
+    # 搜索栏"一键分析"按钮触发逻辑（在 Tab 之前处理）
+    if _go_clicked:
+        if not query:
+            st.toast("请先输入股票代码或名称")
+        else:
+            _last_q = st.session_state.get("_last_query", "")
+            _need_fetch = not stock_ready or query != _last_q
+            if _need_fetch:
+                _resolve_and_fetch(query)
+                st.session_state["_last_query"] = query
+                stock_ready = True
+            if client:
+                for key in core_keys:
+                    if not analyses.get(key) and not is_running(st.session_state, key):
+                        start_analysis(st.session_state, key, client, cfg_now,
+                                       selected_model)
+            st.session_state["active_view"] = "overview"
+            st.rerun()
+
+    # ══════════════════════════════════════════════════════════════════════
+    # 未选股时：显示引导，隐藏 Tab 和按钮行
+    # ══════════════════════════════════════════════════════════════════════
+    if not stock_ready and not _top10_pick:
+        st.markdown(
+            '<div style="text-align:center;color:#9ca3af;padding:2.5rem 1rem;font-size:0.88rem;">'
+            '👆 在上方输入股票代码或名称，点击「一键分析」即可开始'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+        return
+
+    # ══════════════════════════════════════════════════════════════════════
+    # Tab 布局
+    # ══════════════════════════════════════════════════════════════════════
+    tab_analysis, tab_compare, tab_backtest, tab_moe, tab_mystic, tab_qa = st.tabs(
+        ["📊 智能分析", "⚖️ 股票对比", "📈 回测战绩", "🎯 六方会谈", "🔮 玄学炒股", "💬 互动问答"]
+    )
 
     # ══════════════════════════════════════════════════════════════════════
     # Tab 1: 📊 智能分析
     # ══════════════════════════════════════════════════════════════════════
     with tab_analysis:
-        core_keys = ["expectation", "trend", "fundamentals"]
         deep_keys = ["sentiment", "sector", "holders"]
 
         # ── active_view 初始化 ────────────────────────────────────
@@ -638,25 +666,6 @@ def main():
         )
         deep_all_done = all(analyses.get(k) for k in deep_keys)
         deep_any_running = any(is_running(st.session_state, k) for k in deep_keys)
-
-        # 搜索栏"开始分析"按钮触发逻辑
-        if _go_clicked:
-            if not query:
-                st.toast("请先输入股票代码或名称")
-            else:
-                _last_q = st.session_state.get("_last_query", "")
-                _need_fetch = not stock_ready or query != _last_q
-                if _need_fetch:
-                    _resolve_and_fetch(query)
-                    st.session_state["_last_query"] = query
-                    stock_ready = True
-                if client:
-                    for key in core_keys:
-                        if not analyses.get(key) and not is_running(st.session_state, key):
-                            start_analysis(st.session_state, key, client, cfg_now,
-                                           selected_model)
-                st.session_state["active_view"] = "overview"
-                st.rerun()
 
         # Col 0-2: 核心三项按钮
         _view_map = [

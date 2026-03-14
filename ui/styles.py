@@ -58,7 +58,7 @@ def inject_css():
   100% { content: ''; }
 }
 
-/* 搜索行按钮：不受操作栏 CSS 影响，独立样式 */
+/* 搜索行：不受操作栏 CSS 影响，保持自然布局 */
 [data-testid="stHorizontalBlock"]:has(.stTextInput) {
   background: transparent !important;
   border: none !important;
@@ -67,16 +67,28 @@ def inject_css():
   margin-left: 0 !important;
   width: 100% !important;
   border-radius: 0 !important;
+  align-items: flex-end !important;
 }
 [data-testid="stHorizontalBlock"]:has(.stTextInput)::before {
   display: none !important;
 }
 [data-testid="stHorizontalBlock"]:has(.stTextInput) .stButton button {
   border-radius: 50px !important;
-  font-size: 0.85rem !important;
-  padding: 0.5rem 1rem !important;
+  font-size: 0.82rem !important;
+  padding: 0.45rem 1rem !important;
   min-height: unset !important;
   white-space: nowrap !important;
+}
+[data-testid="stHorizontalBlock"]:has(.stTextInput) .stButton button:not([kind="primary"]) {
+  background: var(--bg-soft) !important;
+  border: 1px solid var(--border) !important;
+  color: var(--text-mid) !important;
+  box-shadow: none !important;
+}
+[data-testid="stHorizontalBlock"]:has(.stTextInput) .stButton button:not([kind="primary"]):hover {
+  background: var(--bg-card) !important;
+  color: var(--text) !important;
+  border-color: var(--blue) !important;
 }
 
 html, body, [data-testid="stAppViewContainer"] {
