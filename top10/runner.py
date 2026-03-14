@@ -34,6 +34,54 @@ def _file_path(model_name: str) -> str:
     return os.path.join(_CACHE_DIR, f"{date.today().isoformat()}_{model_name}.json")
 
 
+def _lock_path(model_name: str) -> str:
+    return os.path.join(_CACHE_DIR, f"{date.today().isoformat()}_{model_name}.lock")
+
+
+def _acquire_lock(model_name: str, username: str) -> bool:
+    """跨 session 文件锁：防止多用户同时触发分析。
+    返回 True 表示拿到锁，False 表示已有人在分析。"""
+    lp = _lock_path(model_name)
+    try:
+        # 检查是否存在未过期的锁（超过 15 分钟视为僵尸锁，自动清理）
+        if os.path.exists(lp):
+            import time as _time
+            age = _time.time() - os.path.getmtime(lp)
+            if age < 900:  # 15 分钟内
+                return False
+            # 僵尸锁，清理
+            logger.warning("[top10] 清理僵尸锁（%.0f秒前创建）", age)
+        with open(lp, "w", encoding="utf-8") as f:
+            json.dump({"user": username, "ts": date.today().isoformat()}, f)
+        return True
+    except Exception:
+        return True  # 锁文件操作失败不应阻塞分析
+
+
+def _release_lock(model_name: str):
+    lp = _lock_path(model_name)
+    try:
+        if os.path.exists(lp):
+            os.remove(lp)
+    except Exception:
+        pass
+
+
+def is_locked(model_name: str) -> dict | None:
+    """检查是否有其他用户正在分析，返回 {user} 或 None"""
+    lp = _lock_path(model_name)
+    if not os.path.exists(lp):
+        return None
+    try:
+        import time as _time
+        if _time.time() - os.path.getmtime(lp) >= 900:
+            return None  # 僵尸锁不算
+        with open(lp, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
 def _meta_key(model_name: str) -> str:
     return f"top10_meta_{date.today().isoformat()}_{model_name}"
 
@@ -260,13 +308,26 @@ def start_scoring(ss, candidates_df: pd.DataFrame, model_name: str,
     if is_running(ss):
         return
 
+    # 跨 session 文件锁：防止多用户重复触发
+    if not _acquire_lock(model_name, username):
+        lock_info = is_locked(model_name)
+        who = lock_info.get("user", "其他用户") if lock_info else "其他用户"
+        ss["top10_bg_job"] = {
+            "status": "done", "error": None,
+            "progress": [f"⏳ {who} 正在分析中，请稍等片刻后刷新页面查看结果"],
+            "result": None, "summary": None,
+        }
+        return
+
     client, cfg, err = get_ai_client(model_name)
     if err:
+        _release_lock(model_name)
         ss["top10_bg_job"] = {"status": "done", "error": err, "progress": [f"❌ {err}"]}
         return
 
     # 记录分析开始前的 token 用量
     tokens_before = get_token_usage()["total"]
+    min_expected = max(5, len(candidates_df) // 3)  # 最低完整性阈值
 
     job = {
         "status": "running",
@@ -314,6 +375,16 @@ def start_scoring(ss, candidates_df: pd.DataFrame, model_name: str,
                                max_workers=3)
 
             job["progress"].append(f"✅ 评分完成！共评分 {len(scored)} 只股票")
+
+            # 完整性校验：评分结果太少说明大面积失败，不缓存
+            if len(scored) < min_expected:
+                job["error"] = f"评分结果不完整（仅 {len(scored)}/{len(candidates_df)} 只），不缓存，请重试"
+                job["progress"].append(f"⚠️ 评分结果不完整（{len(scored)}/{len(candidates_df)}），本次不缓存")
+                job["result"] = scored  # 仍展示给当前用户
+                job["status"] = "done"
+                _release_lock(model_name)
+                return
+
             job["result"] = scored
 
             # Phase 3: 生成总结报告
@@ -363,11 +434,14 @@ def start_scoring(ss, candidates_df: pd.DataFrame, model_name: str,
             save_cached_result(model_name, scored, summary,
                                triggered_by=username, tokens_used=tokens_used)
 
+            _release_lock(model_name)
+
             # Phase 4: 自动发送邮件
             job["progress"].append("📧 正在发送 Top10 报告邮件...")
             _send_top10_email(summary, scored, model_name, username, tokens_used)
 
         except Exception as e:
+            _release_lock(model_name)
             job["error"] = str(e)
             job["progress"].append(f"❌ 分析出错：{e}")
             job["status"] = "done"

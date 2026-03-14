@@ -404,35 +404,41 @@ def main():
                 st.markdown("---")
             show_top10_cards(_top10_result)
         else:
-            # 无缓存，无任务 → 显示"开始分析"按钮
-            st.caption(
-                f"使用 **{selected_model}** 从人气榜+成交额榜中筛选并AI评分，"
-                "自动推荐今日最值得关注的10只股票。"
-            )
-            _t10_col1, _t10_col2 = st.columns([1, 1])
-            with _t10_col1:
-                _t10_pool = st.slider("候选池大小", 20, 100, 50, 10,
-                                       key="top10_pool_size")
-            with _t10_col2:
-                _t10_max = st.slider("最大分析数", 10, 50, 30, 5,
-                                      key="top10_max_analyze")
-            if st.button("🚀 开始 Top10 分析", type="primary",
-                         use_container_width=True, key="btn_top10_start"):
-                with st.spinner("📡 正在获取候选股票..."):
-                    from top10.hot_rank import get_hot_rank, get_volume_rank, merge_candidates
-                    from top10.stock_filter import apply_filters
-                    hot_df, _ = get_hot_rank(_t10_pool)
-                    vol_df, _ = get_volume_rank(_t10_pool)
-                    merged = merge_candidates(hot_df, vol_df)
-                    filtered = apply_filters(merged)
-                    candidates = filtered.head(_t10_max)
-                if candidates.empty:
-                    st.warning("候选池为空，请稍后重试")
-                else:
-                    st.info(f"候选池 {len(candidates)} 只股票，开始后台AI评分...")
-                    top10_start(st.session_state, candidates, selected_model,
-                                username=current_user)
-                    st.rerun()
+            # 无缓存，无任务 → 检查是否有其他用户正在分析
+            from top10.runner import is_locked as top10_is_locked
+            _lock_info = top10_is_locked(selected_model)
+            if _lock_info:
+                _lock_user = _lock_info.get("user", "其他用户")
+                st.info(f"⏳ **{_lock_user}** 正在分析中，请稍等片刻后刷新页面查看结果")
+            else:
+                st.caption(
+                    f"使用 **{selected_model}** 从人气榜+成交额榜中筛选并AI评分，"
+                    "自动推荐今日最值得关注的10只股票。"
+                )
+                _t10_col1, _t10_col2 = st.columns([1, 1])
+                with _t10_col1:
+                    _t10_pool = st.slider("候选池大小", 20, 100, 50, 10,
+                                           key="top10_pool_size")
+                with _t10_col2:
+                    _t10_max = st.slider("最大分析数", 10, 50, 30, 5,
+                                          key="top10_max_analyze")
+                if st.button("🚀 开始 Top10 分析", type="primary",
+                             use_container_width=True, key="btn_top10_start"):
+                    with st.spinner("📡 正在获取候选股票..."):
+                        from top10.hot_rank import get_hot_rank, get_volume_rank, merge_candidates
+                        from top10.stock_filter import apply_filters
+                        hot_df, _ = get_hot_rank(_t10_pool)
+                        vol_df, _ = get_volume_rank(_t10_pool)
+                        merged = merge_candidates(hot_df, vol_df)
+                        filtered = apply_filters(merged)
+                        candidates = filtered.head(_t10_max)
+                    if candidates.empty:
+                        st.warning("候选池为空，请稍后重试")
+                    else:
+                        st.info(f"候选池 {len(candidates)} 只股票，开始后台AI评分...")
+                        top10_start(st.session_state, candidates, selected_model,
+                                    username=current_user)
+                        st.rerun()
 
     # ══════════════════════════════════════════════════════════════════════
     # 搜索栏（支持 Top10 点击跳转）
