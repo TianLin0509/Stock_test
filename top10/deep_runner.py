@@ -1,10 +1,10 @@
-"""深度 Top10 流水线 — 100 只候选全量深度分析 + 排序筛选
+"""深度 Top10 流水线 — 候选池评分 + Top30 深度分析 + 排序筛选
 
 流程：
 Phase 1: 获取候选池（人气榜+成交额榜 → 合并 → 初筛 → 100只）
 Phase 2: Tushare 数据增强（PE/PB/K线摘要/行业）
 Phase 3: 并行 AI 三维评分（基本面/题材/技术面）
-Phase 4: 对所有已评分股票做深度分析（6维 + MoE）写入 shared_cache
+Phase 4: 对评分 Top30 做深度分析（6维，不含 MoE）写入 shared_cache
 Phase 5: 排序取 Top10，生成一句话精选理由
 Phase 6: 保存缓存 + 发送邮件
 """
@@ -73,7 +73,7 @@ def _fetch_stock_data(code6: str):
 
 def _deep_analyze_one(client, cfg, model_name: str,
                       code6: str, name: str, username: str = "") -> dict | None:
-    """对单只股票做完整深度分析（6维 + MoE），返回 shared_cache 格式的数据（含 tokens_used）"""
+    """对单只股票做完整深度分析（6维，不含 MoE），返回 shared_cache 格式的数据（含 tokens_used）"""
     from ai.client import call_ai, get_token_usage
     _t_before = get_token_usage()["total"]
 
@@ -147,15 +147,8 @@ def _deep_analyze_one(client, cfg, model_name: str,
         if not err:
             analyses["holders"] = text
 
-        # 7. MoE 辩论（需要核心三项完成）
+        # 保存到 shared_cache（不含 MoE，用户可在六方会谈 Tab 手动触发）
         moe_results = None
-        core_ok = all(analyses.get(k) for k in ["expectation", "trend", "fundamentals"])
-        if core_ok:
-            moe_results = _run_moe_standalone(
-                client, cfg, model_name, name, code6, analyses, username
-            )
-
-        # 保存到 shared_cache
         from utils.shared_cache import save_shared
         save_shared(
             stock_code=ts_code, stock_name=name, model_name=model_name,
@@ -377,11 +370,13 @@ def run_deep_top10(model_name: str = "🟤 豆包 · Seed 2.0 Mini",
 
         _log(f"  ✅ 评分完成，共 {len(scored)} 只")
 
-        # ── Phase 4: 全量深度分析 ────────────────────────────────
+        # ── Phase 4: Top30 深度分析 ───────────────────────────────
         status["phase"] = "深度分析"
         _write_status(status)
-        total = len(scored)
-        _log(f"🔬 Phase 4: 全量深度分析（{total} 只，2路并发）...")
+        _deep_top_n = min(30, len(scored))
+        scored_top = scored.head(_deep_top_n)
+        total = len(scored_top)
+        _log(f"🔬 Phase 4: Top{_deep_top_n} 深度分析（{total} 只，2路并发，不含MoE）...")
 
         deep_results = {}  # code6 → {analyses, moe_results, tokens_used, ...}
         per_stock_tokens = {}  # code6 → tokens
@@ -395,7 +390,7 @@ def run_deep_top10(model_name: str = "🟤 豆包 · Seed 2.0 Mini",
         with ThreadPoolExecutor(max_workers=2) as pool:
             futures = {
                 pool.submit(_analyze_one, row): row["股票名称"]
-                for _, row in scored.iterrows()
+                for _, row in scored_top.iterrows()
             }
             for future in as_completed(futures):
                 stock_name = futures[future]

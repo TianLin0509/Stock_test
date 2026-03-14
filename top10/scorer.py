@@ -110,7 +110,7 @@ def score_single_stock(client, cfg, row: pd.Series,
         industry_pe, industry_pb, quant_score
     )
     text, err = call_ai(client, cfg, prompt,
-                        system=SYSTEM_SCORER, max_tokens=4000)
+                        system=SYSTEM_SCORER, max_tokens=2000)
 
     score = _parse_score(text) if not err else 0.0
     sub_scores = _parse_sub_scores(text) if not err else {}
