@@ -168,13 +168,28 @@ def save_cached_result(model_name: str, df: pd.DataFrame, summary: str = "",
 
 
 def get_all_cached_models() -> list[str]:
-    """获取今日所有已缓存的模型名称"""
+    """获取今日所有已缓存的模型名称（60秒 TTL 缓存到 session_state）"""
+    import time as _time
+    _ss_key = "_top10_all_models_cache"
+    _ts_key = "_top10_all_models_ts"
+    try:
+        cached = st.session_state.get(_ss_key)
+        cached_ts = st.session_state.get(_ts_key, 0)
+        if cached is not None and (_time.time() - cached_ts) < 60:
+            return cached
+    except Exception:
+        pass
     today_str = date.today().isoformat()
     models = []
     for fn in os.listdir(_CACHE_DIR):
         if fn.startswith(today_str) and fn.endswith(".json"):
             model = fn[len(today_str) + 1:-5]  # 去掉日期前缀和.json
             models.append(model)
+    try:
+        st.session_state[_ss_key] = models
+        st.session_state[_ts_key] = _time.time()
+    except Exception:
+        pass
     return models
 
 

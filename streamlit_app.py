@@ -374,6 +374,7 @@ def main():
 
     # ── 折叠时：展开按钮 + 简化状态 ──────────────────────────────────────
     _top10_pick = st.session_state.pop("_top10_pick", None)
+    _fast_rerun_global = st.session_state.pop("_fast_rerun", False)
 
     if _upper_collapsed:
         if _top10_pick:
@@ -395,28 +396,47 @@ def main():
         # ══════════════════════════════════════════════════════════════════════
         # 🏆 今日 Top10 推荐（折叠区）
         # ══════════════════════════════════════════════════════════════════════
-        from top10.runner import (
-            get_cached_result as top10_get_cached,
-            get_cached_summary as top10_get_summary,
-            get_cached_meta as top10_get_meta,
-            get_all_cached_models as top10_all_models,
-        )
-        from top10.cards import show_top10_cards
-        from top10.deep_runner import get_deep_status, is_deep_running, start_deep_top10_async
+        _fast_rerun_ok = False
+        if _fast_rerun_global and st.session_state.get("_top10_cache_key"):
+            # 快速 rerun：跳过文件 I/O，直接用 session_state 已有缓存
+            _top10_cached = st.session_state.get(st.session_state["_top10_cache_key"])
+            _top10_display_model = st.session_state.get("_top10_display_model", selected_model)
+            if _top10_cached is not None:
+                _fast_rerun_ok = True
+                from top10.cards import show_top10_cards
+                from top10.deep_runner import get_deep_status, is_deep_running
+        if not _fast_rerun_ok:
+            from top10.runner import (
+                get_cached_result as top10_get_cached,
+                get_cached_summary as top10_get_summary,
+                get_cached_meta as top10_get_meta,
+                get_all_cached_models as top10_all_models,
+            )
+            from top10.cards import show_top10_cards
+            from top10.deep_runner import get_deep_status, is_deep_running, start_deep_top10_async
 
-        # 尝试找到今日已有缓存的模型（优先选中模型，否则取第一个有缓存的）
-        _top10_cached = top10_get_cached(selected_model)
-        _top10_display_model = selected_model
-        if _top10_cached is None:
-            for _m in top10_all_models():
-                _try = top10_get_cached(_m)
-                if _try is not None:
-                    _top10_cached = _try
-                    _top10_display_model = _m
-                    break
+            # 尝试找到今日已有缓存的模型（优先选中模型，否则取第一个有缓存的）
+            _top10_cached = top10_get_cached(selected_model)
+            _top10_display_model = selected_model
+            if _top10_cached is None:
+                for _m in top10_all_models():
+                    _try = top10_get_cached(_m)
+                    if _try is not None:
+                        _top10_cached = _try
+                        _top10_display_model = _m
+                        break
+            # 保存缓存 key 供快速 rerun 使用
+            if _top10_cached is not None:
+                from top10.runner import _cache_key
+                st.session_state["_top10_cache_key"] = _cache_key(_top10_display_model)
+                st.session_state["_top10_display_model"] = _top10_display_model
 
         # 构建 Top10 标题（含触发者信息）
-        _top10_meta = top10_get_meta(_top10_display_model) if _top10_cached is not None else None
+        if _fast_rerun_ok:
+            from top10.runner import _meta_key
+            _top10_meta = st.session_state.get(_meta_key(_top10_display_model))
+        else:
+            _top10_meta = top10_get_meta(_top10_display_model) if _top10_cached is not None else None
         _top10_title = "🏆 今日 Top10 推荐"
         if _top10_meta:
             _m_user = _top10_meta.get("user", "")
@@ -431,7 +451,11 @@ def main():
         with st.expander(_top10_title, expanded=False):
             if _top10_cached is not None:
                 # 已有今日结果 → 直接展示
-                _top10_summary = top10_get_summary(_top10_display_model)
+                if _fast_rerun_ok:
+                    from top10.runner import _summary_key
+                    _top10_summary = st.session_state.get(_summary_key(_top10_display_model))
+                else:
+                    _top10_summary = top10_get_summary(_top10_display_model)
                 if _top10_summary:
                     st.markdown(_top10_summary)
                     st.markdown("---")
@@ -649,6 +673,7 @@ def main():
                                        selected_model)
             st.session_state["active_view"] = "overview"
             st.session_state["_skip_poll_sleep"] = True
+            st.session_state["_fast_rerun"] = True
             st.rerun()
 
     # ══════════════════════════════════════════════════════════════════════
@@ -725,6 +750,7 @@ def main():
                             start_analysis(st.session_state, key, client, cfg_now,
                                            selected_model)
                     st.session_state["_skip_poll_sleep"] = True
+                    st.session_state["_fast_rerun"] = True
                     st.rerun()
 
         # 深度分析按钮：仅在核心三项完成后显示（独立行）
@@ -745,6 +771,7 @@ def main():
                                                selected_model)
                         st.session_state["_auto_sim"] = True
                     st.session_state["_skip_poll_sleep"] = True
+                    st.session_state["_fast_rerun"] = True
                     st.rerun()
 
         # ── 紧凑状态栏 ──────────────────────────────────────────
