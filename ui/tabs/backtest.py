@@ -90,8 +90,12 @@ def render_backtest_tab():
                 "收盘价": a.get("close", "—"),
             })
         if preview_rows:
-            st.dataframe(pd.DataFrame(preview_rows[::-1]),
-                         use_container_width=True, hide_index=True)
+            df_preview = pd.DataFrame(preview_rows[::-1])
+            # 同日期+代码+模型去重，保留最后一条（最新评级）
+            df_preview = df_preview.drop_duplicates(
+                subset=["日期", "代码", "模型"], keep="first"
+            )
+            st.dataframe(df_preview, use_container_width=True, hide_index=True)
         return
 
     # ══════════════════════════════════════════════════════════
