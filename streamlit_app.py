@@ -66,38 +66,30 @@ def _show_login():
 </div>
 """, unsafe_allow_html=True)
 
-    st.markdown("""<div style="max-width:360px;margin:2rem auto;padding:1.5rem;
-        background:var(--bg-card);border:1px solid var(--border);border-radius:16px;
-        box-shadow:0 4px 24px rgba(99,102,241,0.12);">
-        <h4 style="text-align:center;margin:0 0 1rem;">👤 请输入用户名登录</h4>
-    </div>""", unsafe_allow_html=True)
-
-    # 用 columns 居中，但给足中间列宽度避免手机端溢出
-    _lc, _cc, _rc = st.columns([0.5, 3, 0.5])
-    with _cc:
-        username = st.text_input(
-            "用户名", placeholder="例如：呆瓜方、章鱼哥...",
-            key="_login_username", label_visibility="collapsed",
-        )
-        if st.button("🚀 登录", type="primary", use_container_width=True):
-            name = username.strip()
-            if not name or len(name) < 1 or len(name) > 10:
-                st.warning("用户名长度 1-10 个字符")
-                return
-            if not re.match(r'^[\w\u4e00-\u9fff]+$', name):
-                st.warning("仅支持字母、数字、下划线或中文")
-                return
-            # 加载/创建用户数据
-            from utils.user_store import load_user, save_user
-            user_data = load_user(name)
-            from datetime import datetime
-            user_data["last_login"] = datetime.now().isoformat(timespec="seconds")
-            save_user(user_data)
-            # 记录累计token基数（登录时加载）
-            st.session_state["current_user"] = name
-            st.session_state["_user_base_tokens"] = user_data["token_usage"]["total"]
-            st.rerun()
-        st.caption("无需注册，输入用户名即可使用。数据将按用户名保存。")
+    # 不使用 st.columns，避免触发按钮行 nowrap CSS 规则
+    username = st.text_input(
+        "用户名", placeholder="例如：呆瓜方、章鱼哥...",
+        key="_login_username", label_visibility="collapsed",
+    )
+    if st.button("🚀 登录", type="primary", use_container_width=True):
+        name = username.strip()
+        if not name or len(name) < 1 or len(name) > 10:
+            st.warning("用户名长度 1-10 个字符")
+            return
+        if not re.match(r'^[\w\u4e00-\u9fff]+$', name):
+            st.warning("仅支持字母、数字、下划线或中文")
+            return
+        # 加载/创建用户数据
+        from utils.user_store import load_user, save_user
+        user_data = load_user(name)
+        from datetime import datetime
+        user_data["last_login"] = datetime.now().isoformat(timespec="seconds")
+        save_user(user_data)
+        # 记录累计token基数（登录时加载）
+        st.session_state["current_user"] = name
+        st.session_state["_user_base_tokens"] = user_data["token_usage"]["total"]
+        st.rerun()
+    st.caption("无需注册，输入用户名即可使用。数据将按用户名保存。")
 
 
 def _save_analysis_to_history():
