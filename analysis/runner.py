@@ -171,11 +171,45 @@ def collect_result(session_state, key: str):
 
 def _run_generic(job, client, cfg, model_name, label, build_fn, build_args, username=""):
     """通用分析流程：构建 prompt → 调用 AI → 处理结果"""
+    import time as _time
+
     try:
         _log(job, f"📡 正在连接 {model_name}...")
-        _log(job, f"🤖 AI 正在进行{label}...")
         p, s = build_fn(*build_args)
-        result, err = call_ai(client, cfg, p, system=s, max_tokens=8000, username=username)
+        _log(job, f"🤖 AI 正在进行{label}...")
+
+        # 在子线程中调用 AI，主线程做心跳计时
+        _ai_result = [None, None]  # [text, err]
+        _ai_done = threading.Event()
+
+        def _call():
+            text, err = call_ai(client, cfg, p, system=s, max_tokens=8000, username=username)
+            _ai_result[0] = text
+            _ai_result[1] = err
+            _ai_done.set()
+
+        t = threading.Thread(target=_call, daemon=True)
+        t.start()
+
+        # 心跳：每 5 秒更新进度，让前端感知到活跃
+        _tips = [
+            "正在联网搜索最新资讯...",
+            "正在分析公司基本面数据...",
+            "正在梳理行业竞争格局...",
+            "正在评估技术面信号...",
+            "正在综合多维度信息...",
+            "正在生成分析结论...",
+            "即将完成，请稍候...",
+        ]
+        elapsed = 0
+        tip_idx = 0
+        while not _ai_done.wait(timeout=5):
+            elapsed += 5
+            tip = _tips[min(tip_idx, len(_tips) - 1)]
+            _log(job, f"⏱️ 已等待 {elapsed}s — {tip}")
+            tip_idx += 1
+
+        result, err = _ai_result
         if err:
             _log(job, f"❌ {label}失败：{err}")
             job["result"] = f"⚠️ {label}失败：{err}"
