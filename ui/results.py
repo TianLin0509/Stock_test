@@ -252,6 +252,62 @@ def _render_moe_results():
 </div>""", unsafe_allow_html=True)
 
 
+def render_radar_section():
+    """渲染价值投机雷达仪表盘（核心三项完成后调用）"""
+    from analysis.signal import compute_signal
+    from ui.charts import render_radar
+
+    signal = compute_signal(st.session_state)
+    if not signal:
+        return
+
+    name = st.session_state.get("stock_name", "")
+    st.markdown(f"#### 🎯 {name} · 价值投机雷达")
+    if signal["resonance"]:
+        st.markdown("""<div class="status-banner success">
+  🔥 <strong>四维共振信号</strong> — 基本面、题材、技术、资金四维均达标（≥70），高置信度关注！
+</div>""", unsafe_allow_html=True)
+
+    col_radar, col_scores = st.columns([3, 2])
+    with col_radar:
+        render_radar(signal)
+    with col_scores:
+        for dim_name, dim_score, dim_icon in [
+            ("基本面强度", signal["fundamental"], "📋"),
+            ("题材正宗度", signal["catalyst"], "🔍"),
+            ("技术启动度", signal["technical"], "📈"),
+            ("资金关注度", signal["capital"], "💰"),
+        ]:
+            color = "#16a34a" if dim_score >= 70 else "#f59e0b" if dim_score >= 50 else "#ef4444"
+            st.markdown(
+                f'<div style="margin-bottom:0.7rem;">'
+                f'<div style="font-size:0.8rem;color:#6b7280;margin-bottom:2px;">'
+                f'{dim_icon} {dim_name}</div>'
+                f'<div style="display:flex;align-items:center;gap:8px;">'
+                f'<div style="flex:1;background:#f1f5f9;border-radius:6px;height:8px;overflow:hidden;">'
+                f'<div style="width:{dim_score}%;height:100%;background:{color};'
+                f'border-radius:6px;"></div></div>'
+                f'<span style="font-size:0.9rem;font-weight:700;color:{color};'
+                f'min-width:36px;text-align:right;">{dim_score}</span>'
+                f'</div></div>',
+                unsafe_allow_html=True,
+            )
+        verdict_color = "#16a34a" if signal["resonance"] else \
+                       "#f59e0b" if signal["avg"] >= 60 else "#ef4444"
+        st.markdown(
+            f'<div style="margin-top:0.8rem;padding:0.7rem;'
+            f'background:linear-gradient(135deg,#faf5ff,#fdf2f8);'
+            f'border-radius:10px;border:1px solid #d8b4fe;text-align:center;">'
+            f'<div style="font-size:0.75rem;color:#9ca3af;">综合评分</div>'
+            f'<div style="font-size:1.6rem;font-weight:800;color:{verdict_color};">'
+            f'{signal["avg"]}</div>'
+            f'<div style="font-size:0.82rem;font-weight:600;color:{verdict_color};">'
+            f'{signal["verdict"]}</div></div>',
+            unsafe_allow_html=True,
+        )
+    st.markdown("---")
+
+
 def _render_free_question(client, cfg, model_name, name, tscode, info, analyses):
     st.markdown(f"#### 💬 自由提问 · {name}")
 
