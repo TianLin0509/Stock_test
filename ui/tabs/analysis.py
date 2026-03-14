@@ -146,11 +146,32 @@ def render_analysis_tab(client, cfg_now, selected_model, email_addr):
                         f'⏳{_deep_map[dk]}分析中<span class="loading-dots"></span></span>'
                     )
 
+        # 缓存来源标识（紧跟状态栏，所有视图可见）
+        _shared_from = st.session_state.get("_shared_from")
+        if _shared_from and not any_running(st.session_state):
+            _status_parts.append(
+                f'<span style="color:#f59e0b;">📦 缓存 · {_shared_from}</span>'
+            )
+
         _status_line = " &nbsp;|&nbsp; ".join(_status_parts)
         st.markdown(
             f'<div style="font-size:0.75rem;color:#6b7280;margin:4px 0;">{_status_line}</div>',
             unsafe_allow_html=True,
         )
+
+        # 缓存时显示"重新分析"按钮
+        if _shared_from and not any_running(st.session_state):
+            if st.button("🔄 忽略缓存，重新分析", key="btn_redo_fresh", type="secondary"):
+                st.session_state.pop("_shared_from", None)
+                st.session_state["analyses"] = {}
+                st.session_state.pop("moe_results", None)
+                if client:
+                    for key in CORE_KEYS:
+                        start_analysis(st.session_state, key, client, cfg_now,
+                                       selected_model)
+                st.session_state["active_view"] = "overview"
+                st.session_state["_skip_poll_sleep"] = True
+                st.rerun()
 
     st.markdown("---")
 
@@ -269,11 +290,6 @@ def _render_overview(client, cfg_now, analyses, core_all_done, current_user):
                         st.session_state["_archive_gen"] = st.session_state.get("_archive_gen", 0) + 1
                         st.rerun()
             st.markdown("---")
-
-    # 缓存来源标注
-    shared_from = st.session_state.get("_shared_from")
-    if shared_from and analyses:
-        st.caption(f"📦 当前结果来自缓存：{shared_from}（可重新分析覆盖）")
 
     from ai.client import get_ai_client
     _, _, ai_err = get_ai_client(st.session_state.get("selected_model", ""))
