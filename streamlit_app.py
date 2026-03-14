@@ -512,6 +512,24 @@ def main():
         if _top10_pick:
             st.session_state["query_input"] = _top10_pick
 
+        # 根据分析状态决定按钮文案和可点击性
+        _any_analysis_running = any_running(st.session_state)
+        _core_all_have = all(
+            st.session_state.get("analyses", {}).get(k)
+            or is_running(st.session_state, k)
+            for k in ["expectation", "trend", "fundamentals"]
+        ) if st.session_state.get("stock_name") else False
+
+        if _any_analysis_running:
+            _go_label = "⏳ 分析中…"
+            _go_disabled = True
+        elif _core_all_have:
+            _go_label = "✅ 分析完成"
+            _go_disabled = True
+        else:
+            _go_label = "🚀 一键分析"
+            _go_disabled = False
+
         _search_col, _go_col, _reset_col = st.columns([3, 2, 1.2])
         with _search_col:
             query = st.text_input(
@@ -520,8 +538,9 @@ def main():
                 key="query_input",
             )
         with _go_col:
-            _go_clicked = st.button("🚀 一键分析", type="secondary",
-                                     use_container_width=True, key="btn_go")
+            _go_clicked = st.button(_go_label, type="secondary",
+                                     use_container_width=True, key="btn_go",
+                                     disabled=_go_disabled)
         with _reset_col:
             _reset_clicked = st.button("🔄 重置", type="secondary",
                                         use_container_width=True, key="btn_reset")
