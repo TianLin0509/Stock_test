@@ -541,23 +541,34 @@ def main():
         data_errors = []
 
         with st.status(f"📥 正在获取 {name} 的核心数据...", expanded=True) as s:
-            st.write("▶ 基本信息 & 估值指标...")
-            info, e = get_basic_info(ts_code)
+            st.write("▶ 并行获取基本信息、K线、财务、估值数据...")
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            _fetch_map = {
+                "info": lambda: get_basic_info(ts_code),
+                "price": lambda: get_price_df(ts_code),
+                "fin": lambda: get_financial(ts_code),
+                "val": lambda: get_valuation_history(ts_code),
+            }
+            _fetch_results = {}
+            with ThreadPoolExecutor(max_workers=4) as _pool:
+                _futs = {_pool.submit(fn): key for key, fn in _fetch_map.items()}
+                for fut in as_completed(_futs):
+                    key = _futs[fut]
+                    _fetch_results[key] = fut.result()
+
+            info, e = _fetch_results["info"]
             if e: data_errors.append(e)
             st.session_state["stock_info"] = info
 
-            st.write("▶ 日线K线（近140天）...")
-            df, e = get_price_df(ts_code)
+            df, e = _fetch_results["price"]
             if e: data_errors.append(e)
             st.session_state["price_df"] = df
 
-            st.write("▶ 财务指标...")
-            fin, e = get_financial(ts_code)
+            fin, e = _fetch_results["fin"]
             if e: data_errors.append(e)
             st.session_state["stock_fin"] = fin
 
-            st.write("▶ 历史估值数据...")
-            val_df, e = get_valuation_history(ts_code)
+            val_df, e = _fetch_results["val"]
             if e: data_errors.append(e)
             st.session_state["valuation_df"] = val_df
             s.update(label="✅ 核心数据获取完成！", state="complete")

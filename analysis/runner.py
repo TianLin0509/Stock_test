@@ -54,21 +54,32 @@ def any_running(session_state) -> bool:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _build_trend(job, name, tscode, df):
-    """趋势分析：线程内获取资金/龙虎榜/北向/融资融券数据"""
+    """趋势分析：线程内并行获取资金/龙虎榜/北向/融资融券数据"""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     from data.tushare_client import (
         get_capital_flow, get_dragon_tiger,
         get_northbound_flow, get_margin_trading,
     )
-    _log(job, "📊 计算K线技术指标...")
+    _log(job, "📊 计算K线技术指标 & 并行获取资金数据...")
     psmry = price_summary(df)
-    _log(job, "💰 获取主力资金流向...")
-    cap, _ = get_capital_flow(tscode)
-    _log(job, "🐉 获取龙虎榜数据...")
-    dragon, _ = get_dragon_tiger(tscode)
-    _log(job, "🌏 获取北向资金持仓...")
-    nb, _ = get_northbound_flow(tscode)
-    _log(job, "📊 获取融资融券数据...")
-    margin, _ = get_margin_trading(tscode)
+
+    _data_fns = {
+        "cap": lambda: get_capital_flow(tscode),
+        "dragon": lambda: get_dragon_tiger(tscode),
+        "nb": lambda: get_northbound_flow(tscode),
+        "margin": lambda: get_margin_trading(tscode),
+    }
+    _results = {}
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futs = {pool.submit(fn): key for key, fn in _data_fns.items()}
+        for fut in as_completed(futs):
+            _results[futs[fut]] = fut.result()
+
+    cap, _ = _results["cap"]
+    dragon, _ = _results["dragon"]
+    nb, _ = _results["nb"]
+    margin, _ = _results["margin"]
+    _log(job, "✅ 资金数据获取完成")
     return build_trend_prompt(name, tscode, psmry, cap, dragon, nb, margin)
 
 
@@ -230,17 +241,16 @@ def _run_generic(job, client, cfg, model_name, label, build_fn, build_args, user
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _run_moe(job, client, cfg, model_name, name, tscode, analyses, username=""):
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     from analysis.moe import MOE_ROLES, CEO_SYSTEM
     code6 = to_code6(tscode)
 
     try:
         _log(job, "📋 汇总预期差、趋势、基本面三项分析结果...")
         context = build_analysis_context(analyses, max_per_module=15)
-        _log(job, "🏟️ 召集五方专家进入辩论会场...")
+        _log(job, "🏟️ 召集五方专家并行发表观点...")
 
-        role_results = {}
-        for i, role in enumerate(MOE_ROLES, 1):
-            _log(job, f"🎙️ [{i}/{len(MOE_ROLES)}] {role['badge']} 正在发表观点...")
+        def _call_role(role):
             prompt = f"""辩论标的：{name}（{code6}）
 
 ## 分析背景
@@ -263,8 +273,17 @@ def _run_moe(job, client, cfg, model_name, name, tscode, analyses, username=""):
                                 username=username)
             if err:
                 text = f"⚠️ 该角色分析失败：{err}"
-            role_results[role["key"]] = text
-            _log(job, f"  ✓ {role['badge']} 观点已提交")
+            return role, text
+
+        role_results = {}
+        with ThreadPoolExecutor(max_workers=5) as pool:
+            futs = {pool.submit(_call_role, role): role for role in MOE_ROLES}
+            done_count = 0
+            for fut in as_completed(futs):
+                role, text = fut.result()
+                role_results[role["key"]] = text
+                done_count += 1
+                _log(job, f"  ✓ [{done_count}/{len(MOE_ROLES)}] {role['badge']} 观点已提交")
 
         _log(job, "👔 首席执行官正在综合五方观点，做最终裁决...")
 

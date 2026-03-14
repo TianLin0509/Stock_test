@@ -176,9 +176,9 @@ def _run_moe_standalone(client, cfg, model_name, name, code6, analyses, username
     from analysis.moe import MOE_ROLES, CEO_SYSTEM
 
     context = build_analysis_context(analyses, max_per_module=15)
-    role_results = {}
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    for role in MOE_ROLES:
+    def _call_role(role):
         prompt = f"""辩论标的：{name}（{code6}）
 
 ## 分析背景
@@ -200,7 +200,14 @@ def _run_moe_standalone(client, cfg, model_name, name, code6, analyses, username
                             system=role["system"], max_tokens=800, username=username)
         if err:
             text = f"⚠️ 分析失败：{err}"
-        role_results[role["key"]] = text
+        return role["key"], text
+
+    role_results = {}
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        futs = [pool.submit(_call_role, role) for role in MOE_ROLES]
+        for fut in as_completed(futs):
+            key, text = fut.result()
+            role_results[key] = text
 
     # CEO 裁决
     roles_text = "\n\n".join(
