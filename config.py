@@ -25,7 +25,15 @@ MODEL_CONFIGS = {
         "model":          "doubao-seed-2-0-pro-260215",
         "supports_search": True,
         "provider":       "doubao",
-        "note":           "Seed 2.0 Pro · 联网搜索",
+        "note":           "Seed 2.0 Pro · 联网搜索（贵）",
+    },
+    "🟤 豆包 · Seed 2.0 Mini": {
+        "api_key":        st.secrets.get("DOUBAO_API_KEY", ""),
+        "base_url":       "https://ark.cn-beijing.volces.com/api/v3",
+        "model":          "doubao-seed-2-0-mini-260215",
+        "supports_search": True,
+        "provider":       "doubao",
+        "note":           "Seed 2.0 Mini · 联网搜索（省钱）",
     },
     "⚫ DeepSeek": {
         "api_key":        st.secrets.get("DEEPSEEK_API_KEY", ""),

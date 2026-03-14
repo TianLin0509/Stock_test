@@ -168,7 +168,7 @@ def main():
         st.markdown("---")
         st.markdown("### 🤖 选择分析模型")
         selected_model = st.selectbox(
-            "当前模型", options=MODEL_NAMES, index=2,
+            "当前模型", options=MODEL_NAMES, index=3,
             key="selected_model", label_visibility="collapsed",
         )
         cfg = MODEL_CONFIGS[selected_model]
