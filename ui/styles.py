@@ -199,12 +199,13 @@ html, body, [data-testid="stAppViewContainer"] {
 
 /* 操作按钮行：模仿 Tab 栏风格（桌面+手机通用） */
 [data-testid="stHorizontalBlock"]:has(.stButton) {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 50px;
-  padding: 4px;
+  background: var(--bg-card) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 50px !important;
+  padding: 4px !important;
   gap: 2px !important;
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow) !important;
+  width: fit-content !important;
 }
 [data-testid="stHorizontalBlock"]:has(.stButton) .stButton button {
   border-radius: 50px !important;
