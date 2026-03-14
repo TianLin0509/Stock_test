@@ -1,14 +1,17 @@
 """后台分析调度 — 数据增强 + 并行评分"""
 
 import json
+import logging
 import os
 import threading
 from datetime import date
 import pandas as pd
 import streamlit as st
-from ai.client import get_ai_client, call_ai
+from ai.client import get_ai_client, call_ai, get_token_usage
 from top10.prompts import SYSTEM_SUMMARY, build_summary_prompt
 from top10.scorer import score_all
+
+logger = logging.getLogger(__name__)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -31,6 +34,10 @@ def _file_path(model_name: str) -> str:
     return os.path.join(_CACHE_DIR, f"{date.today().isoformat()}_{model_name}.json")
 
 
+def _meta_key(model_name: str) -> str:
+    return f"top10_meta_{date.today().isoformat()}_{model_name}"
+
+
 def get_cached_result(model_name: str) -> pd.DataFrame | None:
     """优先读 session_state，否则读文件"""
     key = _cache_key(model_name)
@@ -49,10 +56,27 @@ def get_cached_result(model_name: str) -> pd.DataFrame | None:
             skey = _summary_key(model_name)
             if "summary" in data:
                 st.session_state[skey] = data["summary"]
+            # 加载触发者元信息
+            mkey = _meta_key(model_name)
+            if "triggered_by" in data:
+                st.session_state[mkey] = {
+                    "user": data["triggered_by"],
+                    "tokens": data.get("tokens_used", 0),
+                }
             return df
         except Exception:
             pass
     return None
+
+
+def get_cached_meta(model_name: str) -> dict | None:
+    """获取今日分析的触发者信息 {user, tokens}"""
+    mkey = _meta_key(model_name)
+    if mkey in st.session_state:
+        return st.session_state[mkey]
+    # 触发文件读取（会同时加载 meta）
+    get_cached_result(model_name)
+    return st.session_state.get(mkey)
 
 
 def get_cached_summary(model_name: str) -> str | None:
@@ -64,10 +88,15 @@ def get_cached_summary(model_name: str) -> str | None:
     return st.session_state.get(skey)
 
 
-def save_cached_result(model_name: str, df: pd.DataFrame, summary: str = ""):
+def save_cached_result(model_name: str, df: pd.DataFrame, summary: str = "",
+                       triggered_by: str = "", tokens_used: int = 0):
     st.session_state[_cache_key(model_name)] = df
     if summary:
         st.session_state[_summary_key(model_name)] = summary
+    if triggered_by:
+        st.session_state[_meta_key(model_name)] = {
+            "user": triggered_by, "tokens": tokens_used,
+        }
     # 写入文件持久化
     try:
         # 只保存可序列化的列
@@ -77,6 +106,8 @@ def save_cached_result(model_name: str, df: pd.DataFrame, summary: str = ""):
             "summary": summary,
             "model": model_name,
             "date": date.today().isoformat(),
+            "triggered_by": triggered_by,
+            "tokens_used": tokens_used,
         }
         with open(_file_path(model_name), "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2, default=str)
@@ -111,7 +142,120 @@ def is_done(ss) -> bool:
     return get_job(ss).get("status") == "done"
 
 
-def start_scoring(ss, candidates_df: pd.DataFrame, model_name: str):
+def _send_top10_email(summary: str, scored_df: pd.DataFrame,
+                      model_name: str, triggered_by: str, tokens_used: int):
+    """分析完成后自动发送 Top10 报告邮件"""
+    try:
+        from utils.email_sender import smtp_configured, _get_smtp_config, _md_to_html_simple
+        if not smtp_configured():
+            logger.debug("[top10] SMTP 未配置，跳过邮件发送")
+            return
+
+        import smtplib
+        from email.mime.text import MIMEText
+        from email.mime.multipart import MIMEMultipart
+
+        RECIPIENT = "290045045@qq.com"
+        today_str = date.today().strftime("%Y-%m-%d")
+        subject = f"🏆 今日 Top10 推荐 — {today_str} | by {triggered_by}"
+
+        # 构建股票列表 HTML
+        top10 = scored_df.head(10)
+        rows_html = ""
+        for i, (_, r) in enumerate(top10.iterrows(), 1):
+            change = r.get("涨跌幅", 0)
+            change_color = "#ef4444" if change < 0 else "#22c55e"
+            advice = r.get("短线建议", "—")
+            advice_colors = {
+                "强烈推荐": "#dc2626", "推荐": "#f59e0b",
+                "观望": "#6b7280", "回避": "#9ca3af",
+            }
+            advice_color = advice_colors.get(advice, "#6b7280")
+            rows_html += f"""
+            <tr style="border-bottom:1px solid #e5e7eb;">
+                <td style="padding:8px;text-align:center;font-weight:700;color:#6366f1;">{i}</td>
+                <td style="padding:8px;">{r['股票名称']}<br><span style="color:#9ca3af;font-size:11px;">{r['代码']}</span></td>
+                <td style="padding:8px;text-align:center;">{r.get('最新价','—')}</td>
+                <td style="padding:8px;text-align:center;color:{change_color};">{change:+.2f}%</td>
+                <td style="padding:8px;text-align:center;font-weight:700;color:#6366f1;">{r['综合评分']}/10</td>
+                <td style="padding:8px;text-align:center;">{r.get('行业','—')}</td>
+                <td style="padding:8px;text-align:center;"><span style="background:{advice_color};color:#fff;padding:2px 8px;border-radius:10px;font-size:11px;">{advice}</span></td>
+            </tr>"""
+
+        # 构建总结 HTML
+        summary_html = _md_to_html_simple(summary) if summary else ""
+
+        # Token 显示
+        if tokens_used >= 10000:
+            tokens_display = f"{tokens_used / 10000:.1f}万"
+        else:
+            tokens_display = f"{tokens_used:,}"
+
+        html_body = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head>
+<body style="font-family:'Microsoft YaHei','Helvetica Neue',sans-serif;max-width:720px;
+             margin:0 auto;padding:20px;background:#f6f8ff;">
+
+<div style="background:linear-gradient(135deg,#6366f1,#a855f7);color:#fff;
+    border-radius:16px;padding:20px;text-align:center;">
+    <h1 style="margin:0;font-size:22px;">🏆 今日 Top10 推荐</h1>
+    <p style="margin:4px 0 0;opacity:0.9;">{today_str} | 模型：{model_name}</p>
+    <p style="margin:4px 0 0;opacity:0.8;font-size:13px;">分析来自 {triggered_by} 用户，共消耗 {tokens_display} token</p>
+</div>
+
+<div style="background:#fff;border-radius:12px;padding:16px;margin:12px 0;">
+    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+        <thead>
+            <tr style="background:#f8f9ff;border-bottom:2px solid #6366f1;">
+                <th style="padding:8px;">排名</th>
+                <th style="padding:8px;">股票</th>
+                <th style="padding:8px;">最新价</th>
+                <th style="padding:8px;">涨跌幅</th>
+                <th style="padding:8px;">评分</th>
+                <th style="padding:8px;">行业</th>
+                <th style="padding:8px;">建议</th>
+            </tr>
+        </thead>
+        <tbody>{rows_html}</tbody>
+    </table>
+</div>
+
+<div style="background:#fff;border-radius:12px;padding:16px;margin:12px 0;
+            border-left:4px solid #6366f1;">
+    <h3 style="margin:0 0 8px;color:#1e1b4b;">📝 每日总结</h3>
+    <div style="font-size:13px;color:#374151;line-height:1.7;">{summary_html}</div>
+</div>
+
+<div style="text-align:center;color:#9ca3af;font-size:11px;margin-top:20px;">
+    ⚠️ 本报告仅供学习研究，不构成投资建议。<br>
+    Generated by 呆瓜方后援会专属投研助手 · 立花道雪
+</div>
+</body></html>"""
+
+        host, port, user, pwd = _get_smtp_config()
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"] = user
+        msg["To"] = RECIPIENT
+        msg.attach(MIMEText(html_body, "html", "utf-8"))
+
+        if port == 465:
+            with smtplib.SMTP_SSL(host, port, timeout=15) as server:
+                server.login(user, pwd)
+                server.sendmail(user, RECIPIENT, msg.as_string())
+        else:
+            with smtplib.SMTP(host, port, timeout=15) as server:
+                server.starttls()
+                server.login(user, pwd)
+                server.sendmail(user, RECIPIENT, msg.as_string())
+
+        logger.info("[top10] 📧 Top10 报告已发送至 %s", RECIPIENT)
+    except Exception as e:
+        logger.warning("[top10] 邮件发送失败: %s", e)
+
+
+def start_scoring(ss, candidates_df: pd.DataFrame, model_name: str,
+                  username: str = ""):
     """启动后台评分线程"""
     if is_running(ss):
         return
@@ -120,6 +264,9 @@ def start_scoring(ss, candidates_df: pd.DataFrame, model_name: str):
     if err:
         ss["top10_bg_job"] = {"status": "done", "error": err, "progress": [f"❌ {err}"]}
         return
+
+    # 记录分析开始前的 token 用量
+    tokens_before = get_token_usage()["total"]
 
     job = {
         "status": "running",
@@ -130,6 +277,7 @@ def start_scoring(ss, candidates_df: pd.DataFrame, model_name: str):
         "model": model_name,
         "total": len(candidates_df),
         "current": 0,
+        "triggered_by": username,
     }
     ss["top10_bg_job"] = job
 
@@ -203,11 +351,21 @@ def start_scoring(ss, candidates_df: pd.DataFrame, model_name: str):
             except Exception as se:
                 summary = f"总结生成失败：{se}"
 
+            # 计算本次分析消耗的 token
+            tokens_after = get_token_usage()["total"]
+            tokens_used = tokens_after - tokens_before
+
             job["summary"] = summary
-            job["progress"].append("✅ 全部完成！")
+            job["tokens_used"] = tokens_used
+            job["progress"].append(f"✅ 全部完成！（消耗 {tokens_used:,} token）")
             job["status"] = "done"
 
-            save_cached_result(model_name, scored, summary)
+            save_cached_result(model_name, scored, summary,
+                               triggered_by=username, tokens_used=tokens_used)
+
+            # Phase 4: 自动发送邮件
+            job["progress"].append("📧 正在发送 Top10 报告邮件...")
+            _send_top10_email(summary, scored, model_name, username, tokens_used)
 
         except Exception as e:
             job["error"] = str(e)

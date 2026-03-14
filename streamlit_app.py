@@ -357,6 +357,7 @@ def main():
     from top10.runner import (
         get_cached_result as top10_get_cached,
         get_cached_summary as top10_get_summary,
+        get_cached_meta as top10_get_meta,
         is_running as top10_is_running,
         is_done as top10_is_done,
         get_job as top10_get_job,
@@ -364,7 +365,20 @@ def main():
     )
     from top10.cards import show_top10_cards, show_progress as top10_show_progress
 
-    with st.expander("🏆 今日 Top10 推荐", expanded=False):
+    # 构建 Top10 标题（含触发者信息）
+    _top10_meta = top10_get_meta(selected_model)
+    _top10_title = "🏆 今日 Top10 推荐"
+    if _top10_meta:
+        _m_user = _top10_meta.get("user", "")
+        _m_tokens = _top10_meta.get("tokens", 0)
+        if _m_tokens >= 10000:
+            _m_tokens_display = f"{_m_tokens / 10000:.1f}万"
+        else:
+            _m_tokens_display = f"{_m_tokens:,}"
+        if _m_user:
+            _top10_title += f"　(分析来自 **{_m_user}** 用户，共消耗 **{_m_tokens_display}** token)"
+
+    with st.expander(_top10_title, expanded=False):
         # 检查缓存
         _top10_cached = top10_get_cached(selected_model)
         _top10_job = top10_get_job(st.session_state)
@@ -416,7 +430,8 @@ def main():
                     st.warning("候选池为空，请稍后重试")
                 else:
                     st.info(f"候选池 {len(candidates)} 只股票，开始后台AI评分...")
-                    top10_start(st.session_state, candidates, selected_model)
+                    top10_start(st.session_state, candidates, selected_model,
+                                username=current_user)
                     st.rerun()
 
     # ══════════════════════════════════════════════════════════════════════
