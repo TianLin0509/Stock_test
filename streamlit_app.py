@@ -507,7 +507,7 @@ def main():
         if _top10_pick:
             st.session_state["query_input"] = _top10_pick
 
-        _search_col, _go_col, _reset_col = st.columns([5, 2, 1.2])
+        _search_col, _go_col, _reset_col = st.columns([4, 1.5, 1.5])
         with _search_col:
             query = st.text_input(
                 "搜索股票", label_visibility="collapsed",
@@ -515,11 +515,11 @@ def main():
                 key="query_input",
             )
         with _go_col:
-            _go_clicked = st.button("开始分析", type="primary",
+            _go_clicked = st.button("🚀 分析", type="primary",
                                      use_container_width=True, key="btn_go")
         with _reset_col:
-            _reset_clicked = st.button("🔄", use_container_width=True,
-                                        key="btn_reset", help="重置当前分析，保留登录")
+            _reset_clicked = st.button("🔄 重置", type="secondary",
+                                        use_container_width=True, key="btn_reset")
 
         _auto_search = bool(_top10_pick)
 
@@ -720,23 +720,32 @@ def main():
             _status_parts = []
             for k in core_keys:
                 if analyses.get(k):
-                    _status_parts.append(f"✅{_name_map[k]}")
+                    _status_parts.append(f'<span style="color:#16a34a;">✅{_name_map[k]}</span>')
                 elif is_running(st.session_state, k):
-                    _status_parts.append(f"⏳{_name_map[k]}")
+                    _status_parts.append(
+                        f'<span style="color:#6366f1;">'
+                        f'⏳{_name_map[k]}分析中<span class="loading-dots"></span></span>'
+                    )
                 else:
-                    _status_parts.append(f"⬜{_name_map[k]}")
+                    _status_parts.append(f'<span style="color:#9ca3af;">⬜{_name_map[k]}</span>')
 
             # 深度分析状态
             _deep_map = {"sentiment": "舆情", "sector": "板块", "holders": "股东"}
             if deep_any_running or any(analyses.get(k) for k in deep_keys):
                 for dk in deep_keys:
                     if analyses.get(dk):
-                        _status_parts.append(f"✅{_deep_map[dk]}")
+                        _status_parts.append(f'<span style="color:#16a34a;">✅{_deep_map[dk]}</span>')
                     elif is_running(st.session_state, dk):
-                        _status_parts.append(f"⏳{_deep_map[dk]}")
+                        _status_parts.append(
+                            f'<span style="color:#6366f1;">'
+                            f'⏳{_deep_map[dk]}分析中<span class="loading-dots"></span></span>'
+                        )
 
-            _status_line = " | ".join(_status_parts)
-            st.caption(_status_line)
+            _status_line = " &nbsp;|&nbsp; ".join(_status_parts)
+            st.markdown(
+                f'<div style="font-size:0.75rem;color:#6b7280;margin:4px 0;">{_status_line}</div>',
+                unsafe_allow_html=True,
+            )
 
         st.markdown("---")
 

@@ -45,6 +45,40 @@ def inject_css():
   font-size: 0.82rem !important;
 }
 
+/* 动态加载点动画 */
+.loading-dots::after {
+  content: '';
+  animation: dots 1.5s steps(4, end) infinite;
+}
+@keyframes dots {
+  0%   { content: ''; }
+  25%  { content: '.'; }
+  50%  { content: '..'; }
+  75%  { content: '...'; }
+  100% { content: ''; }
+}
+
+/* 搜索行按钮：不受操作栏 CSS 影响，独立样式 */
+[data-testid="stHorizontalBlock"]:has(.stTextInput) {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  margin-left: 0 !important;
+  width: 100% !important;
+  border-radius: 0 !important;
+}
+[data-testid="stHorizontalBlock"]:has(.stTextInput)::before {
+  display: none !important;
+}
+[data-testid="stHorizontalBlock"]:has(.stTextInput) .stButton button {
+  border-radius: 50px !important;
+  font-size: 0.85rem !important;
+  padding: 0.5rem 1rem !important;
+  min-height: unset !important;
+  white-space: nowrap !important;
+}
+
 html, body, [data-testid="stAppViewContainer"] {
   background: var(--bg) !important;
   font-family: 'Noto Sans SC', 'PingFang SC', sans-serif;
