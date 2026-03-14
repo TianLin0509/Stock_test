@@ -378,6 +378,11 @@ def _show_similarity_section(name: str, tscode: str):
         st.warning("K线数据不足，请先查询股票")
         return
 
+    _required_cols = {"日期", "开盘", "最高", "最低", "收盘", "成交量", "涨跌幅"}
+    if not _required_cols.issubset(price_df.columns):
+        st.warning("K线数据格式异常，缺少必要列")
+        return
+
     st.markdown("---")
     st.markdown(f"#### 📐 历史相似走势匹配 · {name}")
 

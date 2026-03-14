@@ -38,7 +38,7 @@ def render_sidebar(current_user: str, on_logout) -> tuple[str, str]:
             st.markdown('<div class="model-badge ok">✅ Tushare 连接正常</div>',
                         unsafe_allow_html=True)
         else:
-            st.markdown('<div class="model-badge ok">✅ 备用数据源就绪（akshare / 东方财富）</div>',
+            st.markdown('<div class="model-badge warn">⚠️ 备用数据源就绪（akshare / 东方财富）</div>',
                         unsafe_allow_html=True)
             st.caption(f"Tushare 不可用：{ts_error}，已自动切换备用源")
 

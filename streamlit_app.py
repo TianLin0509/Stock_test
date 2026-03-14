@@ -237,6 +237,11 @@ def main():
     _top10_pick = st.session_state.pop("_top10_pick", None)
     _fast_rerun_global = st.session_state.pop("_fast_rerun", False)
 
+    # 默认值（两个分支都会覆盖，但提前初始化防止意外未定义）
+    query = ""
+    _go_clicked = False
+    _auto_search = False
+
     if _upper_collapsed:
         if _top10_pick:
             st.session_state["query_input"] = _top10_pick

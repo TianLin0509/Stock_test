@@ -2,7 +2,7 @@
 
 import logging
 import pandas as pd
-from ai.client import call_ai, add_tokens
+from ai.client import call_ai
 from ai.context import build_analysis_context
 from ai.prompts import (
     build_expectation_prompt,
@@ -183,8 +183,8 @@ def run_moe_sync(client, cfg, model_name, name, tscode, analyses,
         with ThreadPoolExecutor(max_workers=5) as pool:
             futs = {pool.submit(_call_role, role): role for role in MOE_ROLES}
             done_count = 0
-            for fut in as_completed(futs):
-                role, text = fut.result()
+            for fut in as_completed(futs, timeout=180):
+                role, text = fut.result(timeout=60)
                 role_results[role["key"]] = text
                 done_count += 1
                 if progress_cb:

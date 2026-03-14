@@ -110,6 +110,12 @@ def render_similar_case(case: dict, idx: int, target_df: pd.DataFrame = None,
     if ctx.empty:
         return
 
+    # 验证必要列存在
+    _required = {"open", "high", "low", "close", "vol", "trade_date", "is_match"}
+    if not _required.issubset(ctx.columns):
+        st.caption(f"案例数据列不完整，跳过")
+        return
+
     code = case["ts_code"]
     stock_name = case.get("stock_name", "") or code
     sim = case["similarity"]

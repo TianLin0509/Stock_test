@@ -24,23 +24,24 @@ _index_loaded = False
 def _load_index_cache():
     """加载 _index.jsonl 到内存，按 stock_code 建立倒排索引"""
     global _index_cache, _index_by_code, _index_loaded
-    _index_cache.clear()
-    _index_by_code.clear()
-    if not INDEX_FILE.exists():
+    with _lock:
+        _index_cache.clear()
+        _index_by_code.clear()
+        if not INDEX_FILE.exists():
+            _index_loaded = True
+            return
+        for line in INDEX_FILE.read_text(encoding="utf-8").strip().split("\n"):
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            _index_cache.append(entry)
+            code = entry.get("stock_code", "")
+            if code:
+                _index_by_code.setdefault(code, []).append(entry)
         _index_loaded = True
-        return
-    for line in INDEX_FILE.read_text(encoding="utf-8").strip().split("\n"):
-        if not line:
-            continue
-        try:
-            entry = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        _index_cache.append(entry)
-        code = entry.get("stock_code", "")
-        if code:
-            _index_by_code.setdefault(code, []).append(entry)
-    _index_loaded = True
 
 
 def _ensure_index_loaded():
@@ -144,16 +145,22 @@ def save_archive(session_state: dict):
     price_df = session_state.get("price_df", pd.DataFrame())
     price_snapshot = {}
     if not price_df.empty:
-        latest = price_df.iloc[-1]
-        price_snapshot = {
-            "date": str(latest.get("日期", "")),
-            "open": float(latest.get("开盘", 0)),
-            "high": float(latest.get("最高", 0)),
-            "low": float(latest.get("最低", 0)),
-            "close": float(latest.get("收盘", 0)),
-            "volume": float(latest.get("成交量", 0)),
-            "pct_chg": float(latest.get("涨跌幅", 0)) if "涨跌幅" in latest.index else 0,
-        }
+        try:
+            latest = price_df.iloc[-1]
+            def _safe_float(val, default=0):
+                try: return float(val) if val is not None else default
+                except (ValueError, TypeError): return default
+            price_snapshot = {
+                "date": str(latest.get("日期", "")),
+                "open": _safe_float(latest.get("开盘")),
+                "high": _safe_float(latest.get("最高")),
+                "low": _safe_float(latest.get("最低")),
+                "close": _safe_float(latest.get("收盘")),
+                "volume": _safe_float(latest.get("成交量")),
+                "pct_chg": _safe_float(latest.get("涨跌幅")),
+            }
+        except Exception:
+            pass  # 价格快照非关键，失败不影响归档
 
     # MoE结果（也做质量校验）
     moe = session_state.get("moe_results", {})
