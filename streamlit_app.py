@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-📈 呆瓜方后援会专属投研助手 v5.1
+📈 呆瓜方后援会专属投研助手 v5.0
 Multi-Model + Tushare · 模块化架构
 """
 
@@ -21,7 +21,7 @@ import streamlit as st
 
 # ── Page Config ──────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="呆瓜方后援会专属投研助手 🌸",
+    page_title="呆瓜方后援会专属投研助手 v5.0 🌸",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="auto",
