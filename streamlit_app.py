@@ -590,7 +590,9 @@ def main():
         for k in ["analyses", "moe_results", "stock_fin",
                    "valuation_df",
                    "qa_history", "similarity_results", "_show_sim",
-                   "active_tab", "active_view", "_auto_sim", "_jobs"]:
+                   "active_tab", "active_view", "_auto_sim", "_jobs",
+                   "_analyses_saved_keys", "_last_archive", "_last_archive_file",
+                   "_shared_from"]:
             st.session_state.pop(k, None)
         for k in list(st.session_state.keys()):
             if k.startswith("_confirm_redo_"):
@@ -1152,13 +1154,16 @@ def main():
         _is_running_now = any_running(st.session_state)
         st.session_state["_was_running"] = _is_running_now
 
-        if _was_running and not _is_running_now:
+        # 增量归档：每完成一个分析就保存，不等全部跑完
+        _analyses_saved = st.session_state.get("_analyses_saved_keys", set())
+        _analyses_now = set(k for k, v in analyses.items() if v and len(v) > 100)
+        if _analyses_now - _analyses_saved:
             try:
                 from utils.archive import save_archive
                 save_archive(st.session_state)
+                st.session_state["_analyses_saved_keys"] = _analyses_now.copy()
             except Exception as e:
                 logger.debug("[poll] 归档失败: %s", e)
-            # （共享缓存已合并到 archive，无需额外保存）
 
         if _is_running_now:
             # 按钮刚触发时跳过 sleep，让 UI 立即刷新
