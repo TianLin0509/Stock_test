@@ -136,6 +136,13 @@ def main():
 
     current_user = st.session_state["current_user"]
 
+    # ── 启动每日备份调度器（12:00 GitHub+邮件） ───────────────────────
+    try:
+        from utils.backup import start_backup_scheduler
+        start_backup_scheduler()
+    except Exception:
+        pass
+
     # ── Header ────────────────────────────────────────────────────────────
     st.markdown("""
 <div class="app-header">
@@ -297,14 +304,20 @@ def main():
                 else:
                     st.caption("暂无用户数据")
 
-                # 归档统计
+                # 归档统计 + 手动备份
                 st.markdown("---")
                 from utils.archive import get_archive_stats
                 _astats = get_archive_stats()
                 st.markdown(
                     f"**📦 分析归档：** {_astats['count']} 条 · {_astats['size_mb']} MB"
                 )
-                st.caption("完整分析文本存于 `data/archive/`，可用于回测")
+                st.caption("每日12:00自动备份到GitHub + 邮件")
+                if st.button("⚡ 立即备份", key="manual_backup"):
+                    with st.spinner("正在备份..."):
+                        from utils.backup import run_daily_backup
+                        _bresults = run_daily_backup()
+                        for _br in _bresults:
+                            st.caption(_br)
 
         st.markdown("---")
         st.markdown("""
@@ -597,8 +610,21 @@ def main():
                         else:
                             st.error(msg)
 
+        # ── 分析完成时自动归档 ──────────────────────────────────────
+        _was_running = st.session_state.get("_was_running", False)
+        _is_running_now = any_running(st.session_state)
+        st.session_state["_was_running"] = _is_running_now
+
+        if _was_running and not _is_running_now:
+            # 刚从"有任务运行"变为"全部完成"，触发归档
+            try:
+                from utils.archive import save_archive
+                save_archive(st.session_state)
+            except Exception:
+                pass
+
         # ── 如果有后台任务在运行，定时刷新 ─────────────────────────
-        if any_running(st.session_state):
+        if _is_running_now:
             time.sleep(1.5)
             st.rerun()
 
