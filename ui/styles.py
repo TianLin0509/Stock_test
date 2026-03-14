@@ -7,7 +7,8 @@ def inject_css():
     """注入全局 CSS 样式"""
     st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;700&display=swap');
+/* Google Fonts：精简字重，减少加载量 */
+@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@600;700;800&family=Noto+Sans+SC:wght@400;500;700&display=swap');
 
 :root {
   --bg:        #f6f8ff;
@@ -58,7 +59,10 @@ def inject_css():
   100% { content: ''; }
 }
 
-/* 搜索行：不受操作栏 CSS 影响，保持自然布局 */
+/* ═══════════════════════════════════════════════════════════════
+   搜索行：输入框 + 一键分析 + 重置（同一行，统一风格）
+   用 :has(.stTextInput) 精确锁定，不影响其他按钮行
+   ═══════════════════════════════════════════════════════════════ */
 [data-testid="stHorizontalBlock"]:has(.stTextInput) {
   background: transparent !important;
   border: none !important;
@@ -72,7 +76,7 @@ def inject_css():
 [data-testid="stHorizontalBlock"]:has(.stTextInput)::before {
   display: none !important;
 }
-/* 搜索行按钮：与输入框完全统一风格 */
+/* 搜索行按钮：与输入框统一的 border 风格 */
 [data-testid="stHorizontalBlock"]:has(.stTextInput) .stButton button {
   border-radius: 50px !important;
   border: 2px solid var(--border) !important;
@@ -93,7 +97,7 @@ def inject_css():
   box-shadow: 0 0 0 3px rgba(99,102,241,0.10) !important;
   transform: translateY(-1px) !important;
 }
-/* 手机触摸按下 */
+/* 触摸按下（桌面+手机通用） */
 [data-testid="stHorizontalBlock"]:has(.stTextInput) .stButton button:active {
   transform: scale(0.97) !important;
   border-color: var(--blue) !important;
@@ -101,9 +105,12 @@ def inject_css():
   box-shadow: 0 0 0 3px rgba(99,102,241,0.12) !important;
 }
 
+/* ═══════════════════════════════════════════════════════════════
+   全局基础
+   ═══════════════════════════════════════════════════════════════ */
 html, body, [data-testid="stAppViewContainer"] {
   background: var(--bg) !important;
-  font-family: 'Noto Sans SC', 'PingFang SC', sans-serif;
+  font-family: 'Noto Sans SC', 'PingFang SC', -apple-system, sans-serif;
   color: var(--text);
 }
 [data-testid="stSidebar"] {
@@ -180,7 +187,12 @@ html, body, [data-testid="stAppViewContainer"] {
   box-shadow: var(--shadow);
 }
 
-/* Tabs */
+/* ═══════════════════════════════════════════════════════════════
+   Tabs — 带右侧渐变遮罩提示可滚动
+   ═══════════════════════════════════════════════════════════════ */
+.stTabs {
+  position: relative;
+}
 .stTabs [data-baseweb="tab-list"] {
   background: var(--bg-card) !important;
   border-radius: 50px !important;
@@ -244,7 +256,9 @@ html, body, [data-testid="stAppViewContainer"] {
   box-shadow: var(--shadow); line-height: 1.8; font-size: 0.92rem;
 }
 
-/* Buttons — 通用 */
+/* ═══════════════════════════════════════════════════════════════
+   Buttons — 通用
+   ═══════════════════════════════════════════════════════════════ */
 .stButton button {
   border-radius: 50px !important;
   font-family: 'Nunito', sans-serif !important;
@@ -261,8 +275,11 @@ html, body, [data-testid="stAppViewContainer"] {
   box-shadow: 0 5px 18px rgba(59,130,246,0.4) !important;
 }
 
-/* 操作按钮行：紧凑 Tab 风格，与上方 Tab 栏呼应 */
-[data-testid="stHorizontalBlock"]:has(.stButton) {
+/* ═══════════════════════════════════════════════════════════════
+   操作按钮行（预期差/趋势/基本面）
+   用 :not(:has(.stTextInput)) 排除搜索行，避免选择器冲突
+   ═══════════════════════════════════════════════════════════════ */
+[data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextInput)) {
   background: var(--bg-card) !important;
   border: 1px solid var(--border) !important;
   border-radius: 50px !important;
@@ -273,19 +290,16 @@ html, body, [data-testid="stAppViewContainer"] {
   margin-left: 8px !important;
   position: relative;
 }
-/* 左侧小竖线：视觉上体现子级关系 */
-[data-testid="stHorizontalBlock"]:has(.stButton)::before {
+/* 左侧小竖线 */
+[data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextInput))::before {
   content: "";
   position: absolute;
-  left: -6px;
-  top: 25%;
-  height: 50%;
-  width: 2px;
+  left: -6px; top: 25%; height: 50%; width: 2px;
   border-radius: 2px;
   background: linear-gradient(180deg, var(--blue), var(--purple));
   opacity: 0.45;
 }
-[data-testid="stHorizontalBlock"]:has(.stButton) .stButton button {
+[data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextInput)) .stButton button {
   border-radius: 50px !important;
   font-family: 'Nunito', sans-serif !important;
   font-weight: 600 !important;
@@ -293,33 +307,35 @@ html, body, [data-testid="stAppViewContainer"] {
   padding: 5px 12px !important;
   min-height: unset !important;
   white-space: nowrap !important;
-  transition: transform 0.15s ease, box-shadow 0.15s ease !important;
+  transition: all 0.15s ease !important;
 }
-/* 悬浮放大效果 */
-[data-testid="stHorizontalBlock"]:has(.stButton) .stButton button:hover {
-  transform: scale(1.08) !important;
+/* 悬浮效果 */
+[data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextInput)) .stButton button:hover {
+  transform: scale(1.05) !important;
   z-index: 2 !important;
   position: relative !important;
 }
-[data-testid="stHorizontalBlock"]:has(.stButton) .stButton button:not([kind="primary"]) {
+[data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextInput)) .stButton button:not([kind="primary"]) {
   background: transparent !important;
   border: none !important;
   color: var(--text-mid) !important;
   box-shadow: none !important;
 }
-[data-testid="stHorizontalBlock"]:has(.stButton) .stButton button:not([kind="primary"]):hover {
+[data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextInput)) .stButton button:not([kind="primary"]):hover {
   background: var(--bg-soft) !important;
   color: var(--blue) !important;
   box-shadow: 0 2px 8px rgba(99,102,241,0.15) !important;
 }
-[data-testid="stHorizontalBlock"]:has(.stButton) .stButton button[kind="primary"] {
+[data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextInput)) .stButton button[kind="primary"] {
   box-shadow: 0 2px 8px rgba(99,102,241,0.25) !important;
 }
-[data-testid="stHorizontalBlock"]:has(.stButton) .stButton button[kind="primary"]:hover {
+[data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextInput)) .stButton button[kind="primary"]:hover {
   box-shadow: 0 4px 14px rgba(99,102,241,0.4) !important;
 }
 
-/* Input */
+/* ═══════════════════════════════════════════════════════════════
+   Input / Select / Metrics
+   ═══════════════════════════════════════════════════════════════ */
 .stTextInput input {
   border-radius: 50px !important;
   border: 2px solid var(--border) !important;
@@ -331,15 +347,11 @@ html, body, [data-testid="stAppViewContainer"] {
   border-color: var(--blue) !important;
   box-shadow: 0 0 0 3px rgba(99,102,241,0.12) !important;
 }
-
-/* Select box */
 .stSelectbox [data-baseweb="select"] > div {
   border-radius: var(--radius-sm) !important;
   border-color: var(--border) !important;
   background: var(--bg-card) !important;
 }
-
-/* Metrics */
 [data-testid="metric-container"] {
   background: var(--bg-card) !important;
   border: 1px solid var(--border) !important;
@@ -357,6 +369,7 @@ html, body, [data-testid="stAppViewContainer"] {
   font-size: 1.15rem !important; font-weight: 800 !important;
   color: var(--text) !important;
 }
+
 /* Disclaimer */
 .disclaimer {
   background: #fff7ed; border: 1px solid #fed7aa;
@@ -405,34 +418,58 @@ hr { border-color: var(--border) !important; margin: 1rem 0 !important; }
     border-radius: 12px;
     margin-bottom: 0.8rem;
   }
-  .app-header h1 {
-    font-size: 1.3rem;
-  }
-  .app-header p {
-    font-size: 0.76rem;
-  }
-  .app-header::before {
-    display: none;  /* 隐藏装饰 emoji */
+  .app-header h1 { font-size: 1.3rem; }
+  .app-header p { font-size: 0.76rem; }
+  .app-header::before { display: none; }
+
+  /* ── 分析内容区：手机端缩小内边距 ── */
+  .analysis-wrap {
+    padding: 1rem 1rem !important;
+    font-size: 0.86rem !important;
   }
 
-  /* ── 搜索栏 & 按钮：单行内输入框更大、按钮更好按 ── */
+  /* ══════════════════════════════════════════════════════════
+     搜索行：手机端保持三元素同行，不堆叠
+     ══════════════════════════════════════════════════════════ */
+  [data-testid="stHorizontalBlock"]:has(.stTextInput) {
+    display: flex !important;
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
+    align-items: flex-end !important;
+    gap: 6px !important;
+  }
+  /* 输入框占更多空间 */
+  [data-testid="stHorizontalBlock"]:has(.stTextInput) > div:first-child {
+    flex: 3 1 0 !important;
+    min-width: 0 !important;
+    width: 0 !important;
+  }
+  /* 按钮列等分剩余空间 */
+  [data-testid="stHorizontalBlock"]:has(.stTextInput) > div:not(:first-child) {
+    flex: 1 1 0 !important;
+    min-width: 0 !important;
+    width: 0 !important;
+  }
   .stTextInput input {
-    font-size: 1rem !important;
-    padding: 0.6rem 1rem !important;
+    font-size: 0.9rem !important;
+    padding: 0.5rem 0.8rem !important;
     border-radius: 12px !important;
   }
+  /* 搜索行按钮手机适配 */
+  [data-testid="stHorizontalBlock"]:has(.stTextInput) .stButton button {
+    border-radius: 12px !important;
+    min-height: 42px !important;
+    font-size: 0.78rem !important;
+    padding: 0.4rem 0.5rem !important;
+    border-width: 1.5px !important;
+  }
+
+  /* ── 通用按钮手机适配 ── */
   .stButton button {
     font-size: 0.82rem !important;
     padding: 0.55rem 0.8rem !important;
     border-radius: 12px !important;
-    min-height: 44px !important;   /* iOS 推荐最小触控尺寸 */
-  }
-  /* 搜索行按钮：手机端圆角与输入框统一 */
-  [data-testid="stHorizontalBlock"]:has(.stTextInput) .stButton button {
-    border-radius: 12px !important;
     min-height: 44px !important;
-    font-size: 0.82rem !important;
-    padding: 0.5rem 0.6rem !important;
   }
 
   /* ── 指标卡片 ── */
@@ -448,7 +485,22 @@ hr { border-color: var(--border) !important; margin: 1rem 0 !important; }
     font-size: 0.92rem !important;
   }
 
-  /* ── Tabs：可滚动，不挤压 ── */
+  /* ══════════════════════════════════════════════════════════
+     Tabs：可滚动 + 右侧渐变遮罩暗示更多内容
+     ══════════════════════════════════════════════════════════ */
+  .stTabs {
+    position: relative;
+  }
+  .stTabs::after {
+    content: "";
+    position: absolute;
+    top: 0; right: 0;
+    width: 40px; height: 40px;
+    background: linear-gradient(to left, var(--bg) 30%, transparent);
+    pointer-events: none;
+    z-index: 2;
+    border-radius: 0 12px 12px 0;
+  }
   .stTabs [data-baseweb="tab-list"] {
     border-radius: 12px !important;
     overflow-x: auto !important;
@@ -473,14 +525,8 @@ hr { border-color: var(--border) !important; margin: 1rem 0 !important; }
     border-radius: 12px;
     margin: 0.6rem 0;
   }
-  .role-badge {
-    font-size: 0.72rem;
-    padding: 2px 10px;
-  }
-  .role-content {
-    font-size: 0.82rem;
-    line-height: 1.65;
-  }
+  .role-badge { font-size: 0.72rem; padding: 2px 10px; }
+  .role-content { font-size: 0.82rem; line-height: 1.65; }
 
   /* ── 状态横幅 ── */
   .status-banner {
@@ -492,10 +538,7 @@ hr { border-color: var(--border) !important; margin: 1rem 0 !important; }
   }
 
   /* ── Model badge ── */
-  .model-badge {
-    font-size: 0.74rem;
-    padding: 3px 10px;
-  }
+  .model-badge { font-size: 0.74rem; padding: 3px 10px; }
 
   /* ── 分析内容中的表格：横向可滚动 ── */
   .stMarkdown table,
@@ -517,30 +560,22 @@ hr { border-color: var(--border) !important; margin: 1rem 0 !important; }
   }
 
   /* ── 免责声明 ── */
-  .disclaimer {
-    font-size: 0.72rem;
-    padding: 0.55rem 0.8rem;
-  }
+  .disclaimer { font-size: 0.72rem; padding: 0.55rem 0.8rem; }
 
   /* ── Plotly 图表：降低高度 ── */
-  [data-testid="stPlotlyChart"] > div {
-    max-height: 360px !important;
-  }
-  .js-plotly-plot .plotly .main-svg {
-    max-height: 360px !important;
-  }
+  [data-testid="stPlotlyChart"] > div { max-height: 360px !important; }
+  .js-plotly-plot .plotly .main-svg { max-height: 360px !important; }
 
-  /* ── 进度条文字缩短 ── */
-  [data-testid="stProgressBarLabel"] {
-    font-size: 0.76rem !important;
-  }
+  /* ── 进度条文字 ── */
+  [data-testid="stProgressBarLabel"] { font-size: 0.76rem !important; }
 
   /* ── 分析标题缩小 ── */
-  h4 {
-    font-size: 1rem !important;
-  }
+  h4 { font-size: 1rem !important; }
 
-  /* ── 列布局自适应：窄屏自动堆叠 ── */
+  /* ══════════════════════════════════════════════════════════
+     列布局自适应：窄屏自动堆叠
+     但排除搜索行（保持横排）和指标行、图表行
+     ══════════════════════════════════════════════════════════ */
   [data-testid="stHorizontalBlock"] {
     flex-wrap: wrap !important;
     gap: 0.3rem !important;
@@ -551,8 +586,8 @@ hr { border-color: var(--border) !important; margin: 1rem 0 !important; }
     width: 100% !important;
   }
 
-  /* 操作按钮行：横排不换行，所有按钮一行可见 */
-  [data-testid="stHorizontalBlock"]:has(.stButton) {
+  /* ── 操作按钮行（预期差/趋势/基本面）：手机横排 ── */
+  [data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextInput)) {
     display: flex !important;
     flex-direction: row !important;
     flex-wrap: nowrap !important;
@@ -564,36 +599,35 @@ hr { border-color: var(--border) !important; margin: 1rem 0 !important; }
     margin-left: 0 !important;
     border: 1px solid var(--border) !important;
   }
-  [data-testid="stHorizontalBlock"]:has(.stButton)::before {
+  [data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextInput))::before {
     display: none !important;
   }
-  [data-testid="stHorizontalBlock"]:has(.stButton)::-webkit-scrollbar {
+  [data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextInput))::-webkit-scrollbar {
     display: none;
   }
-  [data-testid="stHorizontalBlock"]:has(.stButton) > div[data-testid="column"],
-  [data-testid="stHorizontalBlock"]:has(.stButton) > div {
+  [data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextInput)) > div[data-testid="column"],
+  [data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextInput)) > div {
     flex: 1 1 0 !important;
     min-width: 0 !important;
     width: 0 !important;
   }
-  [data-testid="stHorizontalBlock"]:has(.stButton) .stButton button {
-    font-size: 0.68rem !important;
-    padding: 4px 2px !important;
+  [data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextInput)) .stButton button {
+    font-size: 0.72rem !important;
+    padding: 6px 4px !important;
     border-radius: 50px !important;
     white-space: nowrap !important;
     overflow: hidden !important;
     text-overflow: ellipsis !important;
+    min-height: 36px !important;
   }
-  /* 手机端悬浮/触摸放大 */
-  [data-testid="stHorizontalBlock"]:has(.stButton) .stButton button:active {
-    transform: scale(1.12) !important;
-    z-index: 2 !important;
+  /* 手机端触摸反馈：缩放而非放大（不溢出） */
+  [data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextInput)) .stButton button:active {
+    transform: scale(0.95) !important;
+    background: var(--bg-soft) !important;
   }
 
-  /* st.status 折叠态：强制横排不换行 */
-  [data-testid="stStatusWidget"] {
-    max-width: 100% !important;
-  }
+  /* ── st.status 折叠态 ── */
+  [data-testid="stStatusWidget"] { max-width: 100% !important; }
   [data-testid="stStatusWidget"] label {
     white-space: nowrap !important;
     overflow: hidden !important;
@@ -601,7 +635,7 @@ hr { border-color: var(--border) !important; margin: 1rem 0 !important; }
     font-size: 0.78rem !important;
   }
 
-  /* 雷达图+评分条：手机端改为竖排 */
+  /* ── 雷达图+评分条：手机端竖排 ── */
   [data-testid="stHorizontalBlock"]:has([data-testid="stPlotlyChart"]) {
     flex-direction: column !important;
   }
@@ -610,38 +644,38 @@ hr { border-color: var(--border) !important; margin: 1rem 0 !important; }
     min-width: 100% !important;
   }
 
-  /* 图表 margins 缩小 */
-  .js-plotly-plot .plotly .main-svg {
-    max-width: 100% !important;
-  }
+  /* ── 图表宽度 ── */
+  .js-plotly-plot .plotly .main-svg { max-width: 100% !important; }
 
-  /* Top10 卡片紧凑化 */
+  /* ── Top10 卡片紧凑化 ── */
   .top10-card, [style*="border-radius: 16px"][style*="padding: 1rem"] {
     padding: 0.6rem 0.8rem !important;
   }
 
-  /* caption 状态栏：紧凑 */
+  /* ── caption 状态栏 ── */
   [data-testid="stCaptionContainer"] {
     font-size: 0.72rem !important;
     line-height: 1.4 !important;
   }
 
-  /* 指标卡片：每行2个 */
+  /* ── 指标卡片：每行2个 ── */
   [data-testid="stHorizontalBlock"]:has([data-testid="metric-container"]) > div[data-testid="column"] {
     flex: 1 1 46% !important;
     min-width: 46% !important;
   }
 
-  /* 侧边栏宽度限制 */
+  /* ── 侧边栏宽度限制 ── */
   [data-testid="stSidebar"] > div:first-child {
     width: 85vw !important;
     max-width: 300px !important;
   }
 
-  /* Token badge 移到右下角 */
+  /* ── Token badge：手机右下角，更清晰 ── */
   .token-badge {
-    top: auto; bottom: 10px; right: 10px;
-    font-size: 0.68em; padding: 3px 10px; opacity: 0.85;
+    top: auto; bottom: 12px; right: 12px;
+    font-size: 0.72em; padding: 4px 12px;
+    opacity: 0.92;
+    background: rgba(99, 102, 241, 0.85);
   }
 }
 
@@ -649,63 +683,47 @@ hr { border-color: var(--border) !important; margin: 1rem 0 !important; }
    📱 极窄屏幕（≤480px，小屏手机竖屏）
    ═══════════════════════════════════════════════════════════════ */
 @media (max-width: 480px) {
-  .app-header h1 {
-    font-size: 1.1rem;
-  }
-  .app-header p {
-    font-size: 0.68rem;
-  }
-  .app-header {
-    padding: 0.75rem 0.9rem;
-  }
-  .block-container {
-    padding: 0.3rem 0.5rem !important;
-  }
+  .app-header h1 { font-size: 1.1rem; }
+  .app-header p { font-size: 0.68rem; }
+  .app-header { padding: 0.75rem 0.9rem; }
+  .block-container { padding: 0.3rem 0.5rem !important; }
+
   .stTabs [data-baseweb="tab"] {
     font-size: 0.68rem !important;
     padding: 4px 8px !important;
   }
-  [data-testid="stMetricValue"] {
-    font-size: 0.8rem !important;
-  }
-  [data-testid="stMetricLabel"] {
-    font-size: 0.56rem !important;
-  }
-  .role-card {
-    padding: 0.65rem 0.7rem;
-  }
-  .role-content {
-    font-size: 0.76rem;
-    line-height: 1.55;
-  }
-  .role-badge {
-    font-size: 0.66rem;
-  }
+  [data-testid="stMetricValue"] { font-size: 0.8rem !important; }
+  [data-testid="stMetricLabel"] { font-size: 0.56rem !important; }
+  .role-card { padding: 0.65rem 0.7rem; }
+  .role-content { font-size: 0.76rem; line-height: 1.55; }
+  .role-badge { font-size: 0.66rem; }
+
   /* 表格字号进一步缩小 */
-  .stMarkdown table th,
-  .stMarkdown table td,
+  .stMarkdown table th, .stMarkdown table td,
   [data-testid="stMarkdownContainer"] th,
   [data-testid="stMarkdownContainer"] td {
     font-size: 0.7rem !important;
     padding: 3px 6px !important;
   }
   /* Plotly 图表更矮 */
-  [data-testid="stPlotlyChart"] > div {
-    max-height: 300px !important;
-  }
-  h4 {
-    font-size: 0.92rem !important;
-  }
+  [data-testid="stPlotlyChart"] > div { max-height: 300px !important; }
+  h4 { font-size: 0.92rem !important; }
 
   /* 极窄屏：指标完全单列 */
   [data-testid="stHorizontalBlock"]:has([data-testid="metric-container"]) > div[data-testid="column"] {
     flex: 1 1 100% !important;
     min-width: 100% !important;
   }
-  /* 按钮更紧凑但保持横排 */
-  [data-testid="stHorizontalBlock"]:has(.stButton) .stButton button {
+  /* 操作按钮行更紧凑 */
+  [data-testid="stHorizontalBlock"]:has(.stButton):not(:has(.stTextInput)) .stButton button {
     font-size: 0.65rem !important;
     padding: 4px 2px !important;
+  }
+  /* 搜索行按钮更紧凑 */
+  [data-testid="stHorizontalBlock"]:has(.stTextInput) .stButton button {
+    font-size: 0.72rem !important;
+    padding: 0.35rem 0.4rem !important;
+    min-height: 38px !important;
   }
 }
 </style>
