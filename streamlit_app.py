@@ -436,7 +436,7 @@ def main():
 
         _stock_options = st.session_state["_stock_options"]
 
-        _search_col, _go_col, _reset_col = st.columns([3, 2, 1.2])
+        _search_col, _go_col, _reset_col = st.columns([4, 1.5, 1])
         with _search_col:
             if _stock_options:
                 # 如果有预加载候选，提供 selectbox（自带搜索过滤）
@@ -480,6 +480,8 @@ def main():
     # ══════════════════════════════════════════════════════════════════════
     def _resolve_and_fetch(q: str):
         """解析股票 + 获取最少通用数据（info/K线/财务/估值），立即返回以启动分析"""
+        # selectbox 选中值格式为 "600547 航天发展"，提取代码部分
+        q = q.strip().split()[0] if q and " " in q.strip() else q.strip()
         _save_analysis_to_history()
         for k in ["analyses", "moe_results", "stock_fin",
                    "valuation_df",
