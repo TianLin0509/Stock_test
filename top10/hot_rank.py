@@ -1,10 +1,10 @@
 """数据获取 — 人气榜 + 成交额榜（优先 Tushare，备选东财/akshare）"""
 
 import pandas as pd
-import streamlit as st
+from utils.cache_compat import compat_cache
 
 
-@st.cache_data(ttl=1800, show_spinner=False)
+@compat_cache(ttl=1800)
 def get_hot_rank(top_n: int = 100) -> tuple[pd.DataFrame, str | None]:
     """东方财富人气榜 Top N"""
     try:
@@ -21,7 +21,7 @@ def get_hot_rank(top_n: int = 100) -> tuple[pd.DataFrame, str | None]:
         return pd.DataFrame(), f"人气榜获取失败：{e}"
 
 
-@st.cache_data(ttl=1800, show_spinner=False)
+@compat_cache(ttl=1800)
 def get_volume_rank(top_n: int = 100) -> tuple[pd.DataFrame, str | None]:
     """成交额排名 Top N — 优先 Tushare，备选东方财富"""
     # 优先 Tushare
@@ -162,7 +162,7 @@ def merge_candidates(hot_df: pd.DataFrame, vol_df: pd.DataFrame) -> pd.DataFrame
     return merged.reset_index(drop=True)
 
 
-@st.cache_data(ttl=1800, show_spinner=False)
+@compat_cache(ttl=1800)
 def _get_all_volume_data() -> pd.DataFrame:
     """全 A 股成交额排名 — 优先 Tushare，备选东方财富"""
     # 优先 Tushare

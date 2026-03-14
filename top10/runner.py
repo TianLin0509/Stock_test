@@ -138,13 +138,17 @@ def get_cached_summary(model_name: str) -> str | None:
 
 def save_cached_result(model_name: str, df: pd.DataFrame, summary: str = "",
                        triggered_by: str = "", tokens_used: int = 0):
-    st.session_state[_cache_key(model_name)] = df
-    if summary:
-        st.session_state[_summary_key(model_name)] = summary
-    if triggered_by:
-        st.session_state[_meta_key(model_name)] = {
-            "user": triggered_by, "tokens": tokens_used,
-        }
+    # session_state 写入（后台线程无上下文时跳过）
+    try:
+        st.session_state[_cache_key(model_name)] = df
+        if summary:
+            st.session_state[_summary_key(model_name)] = summary
+        if triggered_by:
+            st.session_state[_meta_key(model_name)] = {
+                "user": triggered_by, "tokens": tokens_used,
+            }
+    except Exception:
+        pass  # 后台线程无 Streamlit 上下文
     # 写入文件持久化
     try:
         # 只保存可序列化的列

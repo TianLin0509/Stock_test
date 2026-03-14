@@ -2,7 +2,7 @@
 
 import logging
 import pandas as pd
-import streamlit as st
+from utils.cache_compat import compat_cache
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from data.tushare_client import (
@@ -30,7 +30,7 @@ def get_ts_status() -> str:
 # 批量数据获取
 # ══════════════════════════════════════════════════════════════════════════════
 
-@st.cache_data(ttl=1800, show_spinner=False)
+@compat_cache(ttl=1800)
 def _get_stock_industry() -> dict:
     """获取全市场股票行业分类 → {code6: industry}"""
     if not _pro:
@@ -47,7 +47,7 @@ def _get_stock_industry() -> dict:
     return {}
 
 
-@st.cache_data(ttl=600, show_spinner=False)
+@compat_cache(ttl=600)
 def _get_daily_basic_batch() -> pd.DataFrame:
     """批量获取当日估值数据（PE/PB/市值/换手率/量比）"""
     if not _pro:
@@ -69,7 +69,7 @@ def _get_daily_basic_batch() -> pd.DataFrame:
     return pd.DataFrame()
 
 
-@st.cache_data(ttl=600, show_spinner=False)
+@compat_cache(ttl=600)
 def _get_daily_batch() -> tuple[pd.DataFrame, str]:
     """批量获取当日全市场日线数据（含成交额），返回 (DataFrame, 交易日期)"""
     if not _pro:
@@ -87,7 +87,7 @@ def _get_daily_batch() -> tuple[pd.DataFrame, str]:
     return pd.DataFrame(), ""
 
 
-@st.cache_data(ttl=86400, show_spinner=False)
+@compat_cache(ttl=86400)
 def _get_stock_names() -> dict:
     """全市场股票名称 → {code6: name}"""
     if not _pro:
@@ -351,7 +351,7 @@ def enrich_candidates(df: pd.DataFrame, progress_callback=None) -> pd.DataFrame:
     return enriched
 
 
-@st.cache_data(ttl=1800, show_spinner=False)
+@compat_cache(ttl=1800)
 def _get_industry_benchmarks(basic_df: pd.DataFrame = None) -> dict:
     """计算各行业PE/PB均值基准"""
     if basic_df is None or basic_df.empty:
@@ -386,7 +386,7 @@ def _get_industry_benchmarks(basic_df: pd.DataFrame = None) -> dict:
 # 板块轮动信号
 # ══════════════════════════════════════════════════════════════════════════════
 
-@st.cache_data(ttl=1800, show_spinner=False)
+@compat_cache(ttl=1800)
 def get_sector_rotation() -> dict:
     """获取今日板块轮动信号：概念板块涨幅Top5 + 行业板块涨幅Top5"""
     result = {"概念板块": [], "行业板块": []}

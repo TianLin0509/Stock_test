@@ -154,6 +154,13 @@ def main():
     except Exception as e:
         logger.debug("[main] 备份调度器启动失败: %s", e)
 
+    # ── 启动 Top10 定时调度器（22:00 北京时间） ────────────────────────
+    try:
+        from utils.scheduler import start_top10_scheduler
+        start_top10_scheduler()
+    except Exception as e:
+        logger.debug("[main] Top10调度器启动失败: %s", e)
+
     # ── Header ────────────────────────────────────────────────────────────
     st.markdown("""
 <div class="app-header">
@@ -355,15 +362,24 @@ def main():
         get_cached_result as top10_get_cached,
         get_cached_summary as top10_get_summary,
         get_cached_meta as top10_get_meta,
-        is_running as top10_is_running,
-        is_done as top10_is_done,
-        get_job as top10_get_job,
-        start_scoring as top10_start,
+        get_all_cached_models as top10_all_models,
     )
-    from top10.cards import show_top10_cards, show_progress as top10_show_progress
+    from top10.cards import show_top10_cards
+    from top10.deep_runner import get_deep_status, is_deep_running, start_deep_top10_async
+
+    # 尝试找到今日已有缓存的模型（优先选中模型，否则取第一个有缓存的）
+    _top10_cached = top10_get_cached(selected_model)
+    _top10_display_model = selected_model
+    if _top10_cached is None:
+        for _m in top10_all_models():
+            _try = top10_get_cached(_m)
+            if _try is not None:
+                _top10_cached = _try
+                _top10_display_model = _m
+                break
 
     # 构建 Top10 标题（含触发者信息）
-    _top10_meta = top10_get_meta(selected_model)
+    _top10_meta = top10_get_meta(_top10_display_model) if _top10_cached is not None else None
     _top10_title = "🏆 今日 Top10 推荐"
     if _top10_meta:
         _m_user = _top10_meta.get("user", "")
@@ -373,69 +389,61 @@ def main():
         else:
             _m_tokens_display = f"{_m_tokens:,}"
         if _m_user:
-            _top10_title += f"　(分析来自 **{_m_user}** 用户，共消耗 **{_m_tokens_display}** token)"
+            _top10_title += f"　(分析来自 **{_m_user}**，共消耗 **{_m_tokens_display}** token)"
 
     with st.expander(_top10_title, expanded=False):
-        # 检查缓存
-        _top10_cached = top10_get_cached(selected_model)
-        _top10_job = top10_get_job(st.session_state)
-
         if _top10_cached is not None:
             # 已有今日结果 → 直接展示
-            _top10_summary = top10_get_summary(selected_model)
+            _top10_summary = top10_get_summary(_top10_display_model)
             if _top10_summary:
                 st.markdown(_top10_summary)
                 st.markdown("---")
             show_top10_cards(_top10_cached)
-        elif top10_is_running(st.session_state):
-            # 正在分析 → 显示进度
-            top10_show_progress(_top10_job)
-            time.sleep(1.5)
+        elif is_deep_running():
+            # 深度分析正在运行
+            _deep_status = get_deep_status() or {}
+            _phase = _deep_status.get("phase", "初始化")
+            st.info(f"🔬 深度 Top10 分析正在后台运行中（当前阶段：**{_phase}**）")
+            st.caption("分析完成后刷新页面即可查看结果")
+            time.sleep(3)
             st.rerun()
-        elif top10_is_done(st.session_state) and _top10_job.get("result") is not None:
-            # 刚完成 → 展示结果
-            _top10_result = _top10_job["result"]
-            _top10_summary_text = _top10_job.get("summary", "")
-            if _top10_summary_text:
-                st.markdown(_top10_summary_text)
-                st.markdown("---")
-            show_top10_cards(_top10_result)
         else:
-            # 无缓存，无任务 → 检查是否有其他用户正在分析
-            from top10.runner import is_locked as top10_is_locked
-            _lock_info = top10_is_locked(selected_model)
-            if _lock_info:
-                _lock_user = _lock_info.get("user", "其他用户")
-                st.info(f"⏳ **{_lock_user}** 正在分析中，请稍等片刻后刷新页面查看结果")
-            else:
-                st.caption(
-                    f"使用 **{selected_model}** 从人气榜+成交额榜中筛选并AI评分，"
-                    "自动推荐今日最值得关注的10只股票。"
-                )
-                _t10_col1, _t10_col2 = st.columns([1, 1])
-                with _t10_col1:
-                    _t10_pool = st.slider("候选池大小", 20, 100, 50, 10,
-                                           key="top10_pool_size")
-                with _t10_col2:
-                    _t10_max = st.slider("最大分析数", 10, 50, 30, 5,
-                                          key="top10_max_analyze")
-                if st.button("🚀 开始 Top10 分析", type="primary",
-                             use_container_width=True, key="btn_top10_start"):
-                    with st.spinner("📡 正在获取候选股票..."):
-                        from top10.hot_rank import get_hot_rank, get_volume_rank, merge_candidates
-                        from top10.stock_filter import apply_filters
-                        hot_df, _ = get_hot_rank(_t10_pool)
-                        vol_df, _ = get_volume_rank(_t10_pool)
-                        merged = merge_candidates(hot_df, vol_df)
-                        filtered = apply_filters(merged)
-                        candidates = filtered.head(_t10_max)
-                    if candidates.empty:
-                        st.warning("候选池为空，请稍后重试")
+            # 无缓存
+            _deep_status = get_deep_status()
+            if _deep_status and _deep_status.get("status") == "error":
+                st.error(f"上次深度分析失败：{_deep_status.get('error', '未知错误')}")
+
+            st.caption("每晚 22:00 自动运行深度分析（100只候选全量深度分析 + MoE辩论），结果每日刷新。")
+
+            # 仅管理员 LT 可手动触发
+            if current_user == "LT":
+                st.markdown("---")
+                st.markdown("##### 🔧 管理员操作")
+                _admin_col1, _admin_col2 = st.columns([2, 1])
+                with _admin_col1:
+                    _admin_model = st.selectbox(
+                        "分析模型", MODEL_NAMES,
+                        index=MODEL_NAMES.index("🟤 豆包 · Seed 2.0 Mini")
+                        if "🟤 豆包 · Seed 2.0 Mini" in MODEL_NAMES else 0,
+                        key="admin_top10_model",
+                    )
+                with _admin_col2:
+                    _admin_pool = st.number_input(
+                        "候选池", min_value=20, max_value=200, value=100,
+                        step=10, key="admin_top10_pool",
+                    )
+                if st.button("🚀 手动触发深度 Top10 分析", type="primary",
+                             use_container_width=True, key="btn_admin_deep_top10"):
+                    ok = start_deep_top10_async(
+                        model_name=_admin_model,
+                        candidate_count=_admin_pool,
+                        username=current_user,
+                    )
+                    if ok:
+                        st.success("✅ 深度分析已在后台启动，预计需要较长时间，请稍后刷新查看")
                     else:
-                        st.info(f"候选池 {len(candidates)} 只股票，开始后台AI评分...")
-                        top10_start(st.session_state, candidates, selected_model,
-                                    username=current_user)
-                        st.rerun()
+                        st.warning("⏳ 已有分析任务在运行中")
+                    st.rerun()
 
     # ══════════════════════════════════════════════════════════════════════
     # 搜索栏（支持 Top10 点击跳转）
@@ -705,35 +713,56 @@ def main():
                 if not analyses:
                     shared_list = find_shared(
                         st.session_state["stock_code"],
-                        exclude_user=current_user,
+                        exclude_user="",  # 不排除任何人，包括 auto_scheduler
                     )
                     if shared_list:
-                        for sh in shared_list:
-                            ts_short = sh["timestamp"][11:16]
-                            keys_str = "、".join({
-                                "expectation": "预期差", "trend": "趋势解读",
-                                "fundamentals": "基本面", "sentiment": "舆情",
-                                "sector": "板块", "holders": "股东",
-                            }.get(k, k) for k in sh["analyses_keys"])
-                            moe_tag = " + MoE辩论" if sh["has_moe"] else ""
-                            st.info(
-                                f"📦 **{sh['username']}** 于 {ts_short} 已用 "
-                                f"{sh['model_name']} 分析过此股票（{keys_str}{moe_tag}）"
-                            )
-                            if st.button(
-                                f"📥 加载 {sh['username']} 的分析结果（免费）",
-                                key=f"load_shared_{sh['username']}_{sh['model_name']}",
-                            ):
-                                shared_data = load_shared(sh["file_path"])
-                                if shared_data:
-                                    st.session_state["analyses"] = shared_data.get("analyses", {})
-                                    if shared_data.get("moe_results"):
-                                        st.session_state["moe_results"] = shared_data["moe_results"]
-                                    st.session_state["_shared_from"] = (
-                                        f"{sh['username']} · {sh['model_name']} · {ts_short}"
-                                    )
-                                    st.rerun()
-                        st.markdown("---")
+                        # 自动加载 Top10 深度分析的结果（auto_scheduler）
+                        _auto_entry = next(
+                            (s for s in shared_list
+                             if s["username"] == "auto_scheduler" and s["has_moe"]),
+                            None,
+                        )
+                        if _auto_entry:
+                            shared_data = load_shared(_auto_entry["file_path"])
+                            if shared_data and shared_data.get("analyses"):
+                                st.session_state["analyses"] = shared_data["analyses"]
+                                if shared_data.get("moe_results"):
+                                    st.session_state["moe_results"] = shared_data["moe_results"]
+                                st.session_state["_shared_from"] = (
+                                    f"今日Top10深度分析 · {_auto_entry['model_name']}"
+                                )
+                                st.rerun()
+
+                        # 其他用户的共享缓存（手动加载）
+                        _other = [s for s in shared_list
+                                  if s["username"] != current_user]
+                        if _other:
+                            for sh in _other:
+                                ts_short = sh["timestamp"][11:16]
+                                keys_str = "、".join({
+                                    "expectation": "预期差", "trend": "趋势解读",
+                                    "fundamentals": "基本面", "sentiment": "舆情",
+                                    "sector": "板块", "holders": "股东",
+                                }.get(k, k) for k in sh["analyses_keys"])
+                                moe_tag = " + MoE辩论" if sh["has_moe"] else ""
+                                st.info(
+                                    f"📦 **{sh['username']}** 于 {ts_short} 已用 "
+                                    f"{sh['model_name']} 分析过此股票（{keys_str}{moe_tag}）"
+                                )
+                                if st.button(
+                                    f"📥 加载 {sh['username']} 的分析结果（免费）",
+                                    key=f"load_shared_{sh['username']}_{sh['model_name']}",
+                                ):
+                                    shared_data = load_shared(sh["file_path"])
+                                    if shared_data:
+                                        st.session_state["analyses"] = shared_data.get("analyses", {})
+                                        if shared_data.get("moe_results"):
+                                            st.session_state["moe_results"] = shared_data["moe_results"]
+                                        st.session_state["_shared_from"] = (
+                                            f"{sh['username']} · {sh['model_name']} · {ts_short}"
+                                        )
+                                        st.rerun()
+                            st.markdown("---")
 
                 # 共享来源标注
                 shared_from = st.session_state.get("_shared_from")

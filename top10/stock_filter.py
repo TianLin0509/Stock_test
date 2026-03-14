@@ -1,10 +1,10 @@
 """量化初筛 — 过滤不适合短线的标的"""
 
 import pandas as pd
-import streamlit as st
+from utils.cache_compat import compat_cache
 
 
-@st.cache_data(ttl=86400, show_spinner=False)
+@compat_cache(ttl=86400)
 def apply_filters(df: pd.DataFrame) -> pd.DataFrame:
     """对候选池做量化初筛，返回过滤后的 DataFrame"""
     if df.empty:
