@@ -830,7 +830,7 @@ def main():
                 if not analyses:
                     _stock_code = st.session_state["stock_code"]
                     # 1) 自动恢复：查找最近24h内该股票的归档（含自己的）
-                    _recent = find_recent(_stock_code, max_hours=24)
+                    _recent = find_recent(_stock_code)
                     if _recent:
                         _recent_data = load_archive(_recent["file"])
                         if _recent_data and _recent_data.get("analyses"):

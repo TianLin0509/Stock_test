@@ -257,11 +257,25 @@ def get_archive_stats() -> dict:
 
 # ── 缓存查询（替代 shared_cache）─────────────────────────────────────
 
-def find_recent(stock_code: str, max_hours: int = 24) -> dict | None:
-    """查找该股票最近一次归档（不限用户），返回索引条目或 None"""
+def _get_cutoff() -> float:
+    """获取当前周期的起始时间戳（以每天19:00北京时间为分界）
+    - 19:00之前：cutoff = 昨天19:00
+    - 19:00之后：cutoff = 今天19:00
+    """
+    now = datetime.now()
+    today_7pm = now.replace(hour=19, minute=0, second=0, microsecond=0)
+    if now >= today_7pm:
+        return today_7pm.timestamp()
+    else:
+        from datetime import timedelta
+        return (today_7pm - timedelta(days=1)).timestamp()
+
+
+def find_recent(stock_code: str) -> dict | None:
+    """查找该股票在当前周期内（最近19:00后）的最新归档，返回索引条目或 None"""
     if not INDEX_FILE.exists():
         return None
-    cutoff = datetime.now().timestamp() - max_hours * 3600
+    cutoff = _get_cutoff()
     best = None
     for line in INDEX_FILE.read_text(encoding="utf-8").strip().split("\n"):
         if not line:
@@ -284,10 +298,10 @@ def find_recent(stock_code: str, max_hours: int = 24) -> dict | None:
 
 
 def find_today_others(stock_code: str, exclude_user: str = "") -> list[dict]:
-    """查找今日该股票其他用户的归档（用于亲友共享加载）"""
+    """查找当前周期内（最近19:00后）该股票其他用户的归档"""
     if not INDEX_FILE.exists():
         return []
-    today_str = datetime.now().strftime("%Y-%m-%d")
+    cutoff = _get_cutoff()
     results = []
     for line in INDEX_FILE.read_text(encoding="utf-8").strip().split("\n"):
         if not line:
@@ -298,7 +312,11 @@ def find_today_others(stock_code: str, exclude_user: str = "") -> list[dict]:
             continue
         if entry.get("stock_code") != stock_code:
             continue
-        if entry.get("date") != today_str:
+        try:
+            ts = datetime.fromisoformat(entry["ts"]).timestamp()
+        except (ValueError, KeyError):
+            continue
+        if ts < cutoff:
             continue
         if exclude_user and entry.get("username") == exclude_user:
             continue
