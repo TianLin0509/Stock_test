@@ -32,6 +32,8 @@ from data.tushare_client import (
     ts_ok, get_ts_error, get_data_source, resolve_stock, to_code6,
     get_basic_info, get_price_df, get_financial,
     get_capital_flow, get_dragon_tiger,
+    get_valuation_history, get_northbound_flow, get_margin_trading,
+    get_sector_peers, get_holders_info, get_pledge_info, get_fund_holdings,
 )
 from ai.client import get_ai_client, get_token_usage
 from analysis.runner import (
@@ -133,7 +135,8 @@ def main():
     # ══════════════════════════════════════════════════════════════════════
     # 收集已完成的后台任务结果（每次 rerun 都执行）
     # ══════════════════════════════════════════════════════════════════════
-    for key in ["expectation", "trend", "fundamentals", "moe"]:
+    for key in ["expectation", "trend", "fundamentals", "moe",
+                 "sentiment", "sector", "holders"]:
         collect_result(st.session_state, key)
 
     # ══════════════════════════════════════════════════════════════════════
@@ -160,9 +163,19 @@ def main():
             return f"✅ {name}完成"
         return f"{icon} {name}"
 
-    bc1, bc2, bc3, bc4, bc5, bc6, bc7, bc8 = st.columns(8)
+    # 主操作行：一键分析（突出）+ 自由提问
+    pr1, pr2, pr3 = st.columns([2, 1, 1])
+    with pr1:
+        btn_all = st.button("🚀 一键全面分析", type="primary", use_container_width=True)
+    with pr2:
+        btn_qa = st.button("💬 自由提问", use_container_width=True)
+    with pr3:
+        btn_mystic = st.button("🔮 玄学炒股", use_container_width=True)
+
+    # 单项分析行（核心三项 + MoE + K线匹配）
+    bc1, bc2, bc3, bc4, bc5 = st.columns(5)
     with bc1:
-        btn_exp = st.button(_label("expectation", "预期差分析", "🔍"),
+        btn_exp = st.button(_label("expectation", "预期差", "🔍"),
                             use_container_width=True)
     with bc2:
         btn_trend = st.button(_label("trend", "K线趋势", "📈"),
@@ -174,20 +187,29 @@ def main():
         btn_moe = st.button(_label("moe", "MoE辩论", "🎯"),
                             use_container_width=True)
     with bc5:
-        btn_qa = st.button("💬 自由提问", use_container_width=True)
-    with bc6:
-        btn_all = st.button("🚀 一键分析", type="primary", use_container_width=True)
-    with bc7:
         btn_sim = st.button("📐 K线匹配", use_container_width=True)
-    with bc8:
-        btn_mystic = st.button("🔮 玄学炒股", use_container_width=True)
+
+    # 深度分析行（舆情 + 板块 + 股东）
+    dc1, dc2, dc3 = st.columns(3)
+    with dc1:
+        btn_sentiment = st.button(_label("sentiment", "舆情分析", "📣"),
+                                  use_container_width=True)
+    with dc2:
+        btn_sector = st.button(_label("sector", "板块联动", "🏭"),
+                               use_container_width=True)
+    with dc3:
+        btn_holders = st.button(_label("holders", "股东动向", "👥"),
+                                use_container_width=True)
 
     # ══════════════════════════════════════════════════════════════════════
     # 查询股票逻辑
     # ══════════════════════════════════════════════════════════════════════
     if search_btn and query:
         for k in ["analyses", "moe_results", "stock_fin", "stock_cap",
-                   "stock_dragon", "qa_history", "similarity_results",
+                   "stock_dragon", "stock_northbound", "stock_margin",
+                   "valuation_df", "stock_sector_peers", "stock_holders",
+                   "stock_pledge", "stock_fund_holdings",
+                   "qa_history", "similarity_results",
                    "active_tab", "_jobs"]:
             st.session_state.pop(k, None)
         st.session_state["analyses"] = {}
@@ -227,6 +249,41 @@ def main():
             dragon, e = get_dragon_tiger(ts_code)
             if e: data_errors.append(e)
             st.session_state["stock_dragon"] = dragon
+
+            st.write("▶ 历史估值数据（PE/PB分位）...")
+            val_df, e = get_valuation_history(ts_code)
+            if e: data_errors.append(e)
+            st.session_state["valuation_df"] = val_df
+
+            st.write("▶ 北向资金持仓...")
+            nb_flow, e = get_northbound_flow(ts_code)
+            if e: data_errors.append(e)
+            st.session_state["stock_northbound"] = nb_flow
+
+            st.write("▶ 融资融券数据...")
+            margin, e = get_margin_trading(ts_code)
+            if e: data_errors.append(e)
+            st.session_state["stock_margin"] = margin
+
+            st.write("▶ 同行业个股对比...")
+            sector_peers, e = get_sector_peers(ts_code)
+            if e: data_errors.append(e)
+            st.session_state["stock_sector_peers"] = sector_peers
+
+            st.write("▶ 十大股东...")
+            holders, e = get_holders_info(ts_code)
+            if e: data_errors.append(e)
+            st.session_state["stock_holders"] = holders
+
+            st.write("▶ 股权质押...")
+            pledge, e = get_pledge_info(ts_code)
+            if e: data_errors.append(e)
+            st.session_state["stock_pledge"] = pledge
+
+            st.write("▶ 基金持仓...")
+            fund_hold, e = get_fund_holdings(ts_code)
+            if e: data_errors.append(e)
+            st.session_state["stock_fund_holdings"] = fund_hold
             s.update(label="✅ 数据获取完成！", state="complete")
 
         if data_errors:
@@ -238,7 +295,8 @@ def main():
     # 按钮响应
     # ══════════════════════════════════════════════════════════════════════
     stock_ready = bool(st.session_state.get("stock_name"))
-    any_btn = btn_exp or btn_trend or btn_fund or btn_moe or btn_qa or btn_all or btn_sim or btn_mystic
+    any_btn = (btn_exp or btn_trend or btn_fund or btn_moe or btn_qa or btn_all
+               or btn_sim or btn_mystic or btn_sentiment or btn_sector or btn_holders)
 
     # 玄学炒股不需要先查询股票，单独处理
     if btn_mystic:
@@ -281,6 +339,21 @@ def main():
                 if not missing:
                     start_analysis(st.session_state, "moe", client, cfg_now, selected_model)
                     st.rerun()
+        elif btn_sentiment:
+            st.session_state["active_tab"] = "sentiment"
+            if client and not analyses.get("sentiment") and not is_running(st.session_state, "sentiment"):
+                start_analysis(st.session_state, "sentiment", client, cfg_now, selected_model)
+                st.rerun()
+        elif btn_sector:
+            st.session_state["active_tab"] = "sector"
+            if client and not analyses.get("sector") and not is_running(st.session_state, "sector"):
+                start_analysis(st.session_state, "sector", client, cfg_now, selected_model)
+                st.rerun()
+        elif btn_holders:
+            st.session_state["active_tab"] = "holders"
+            if client and not analyses.get("holders") and not is_running(st.session_state, "holders"):
+                start_analysis(st.session_state, "holders", client, cfg_now, selected_model)
+                st.rerun()
         elif btn_sim:
             st.session_state["active_tab"] = "similarity"
         elif btn_qa:
@@ -321,9 +394,9 @@ def main():
 
 
 def _show_stock_overview():
-    """显示股票概览：指标卡片 + K线图"""
+    """显示股票概览：指标卡片 + K线图 + 估值分位图"""
     import pandas as pd
-    from ui.charts import render_kline
+    from ui.charts import render_kline, render_valuation_bands
 
     name = st.session_state["stock_name"]
     ts_code = st.session_state["stock_code"]
@@ -349,6 +422,12 @@ def _show_stock_overview():
     if not df.empty:
         st.markdown("---")
         render_kline(df, name, ts_code)
+
+    # 估值历史分位图
+    val_df = st.session_state.get("valuation_df", pd.DataFrame())
+    if not val_df.empty:
+        st.markdown(f"#### 📊 {name} · 估值历史分位")
+        render_valuation_bands(val_df, name)
 
 
 def _show_mystic(client, cfg, model_name):

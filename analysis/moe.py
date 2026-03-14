@@ -17,6 +17,13 @@ MOE_ROLES = [
     {"key": "quant", "css": "r-quant", "badge": "🤖 量化资金 · Alpha机器",
      "system": "你是A股量化多因子研究员「Alpha机器」。"
                "基于数据和统计规律，关注动量/价值/质量/情绪/资金流因子，善用概率表述。"},
+    {"key": "value_spec", "css": "r-vspec", "badge": "🎯 价值投机 · 道雪流",
+     "system": "你是A股「价值投机」流派高手「道雪流」，融合价值投资与趋势投机的精华。"
+               "核心方法论三要素缺一不可：①基本面过硬（ROE>15%、营收持续增长、现金流健康）；"
+               "②题材正宗（真受益标的，非蹭概念，有明确催化剂和炒作逻辑）；"
+               "③技术确认右侧入场（放量突破关键阻力、均线多头排列、主力资金持续净流入）。"
+               "你只参与三者共振的标的，不满足任一条件则直接放弃。"
+               "语言风格：理性果断，数据说话，不模棱两可。擅长发现'基本面强+题材催化+资金启动'的三维共振机会。"},
     {"key": "retail", "css": "r-retail", "badge": "👥 普通散户 · 韭菜代表 ⚠️反向指标",
      "system": "你是典型A股散户「韭菜代表」，你的观点是重要的反向指标！"
                "追涨杀跌，高点乐观底部恐慌。口语化，带散户焦虑/贪婪/侥幸心理。"},
@@ -25,8 +32,9 @@ MOE_ROLES = [
 CEO_SYSTEM = (
     "你是掌管300亿私募的顶级CEO，历经2008/2015/2018三次A股大崩盘，20年投资经验。"
     "深知散户情绪是最可靠的反向指标。"
-    "综合四位专家观点，给出明确、可操作、附具体价格的最终裁决。"
-    "重点参考机构和量化的理性分析，逆向参考散户的情绪化判断。"
+    "综合五位专家观点，给出明确、可操作、附具体价格的最终裁决。"
+    "重点参考机构、量化和价值投机的理性分析，逆向参考散户的情绪化判断。"
+    "特别关注价值投机手的「三维共振」判断——基本面+题材+技术是否同时满足。"
 )
 
 
@@ -37,7 +45,7 @@ def run_moe(client, cfg, name, ts_code, analyses: dict) -> None:
         st.write("📋 汇总预期差、趋势、基本面三项分析结果...")
         time.sleep(0.5)
         context = build_analysis_context(analyses, max_per_module=15)
-        st.write("🏟️ 召集四方专家进入辩论会场...")
+        st.write("🏟️ 召集五方专家进入辩论会场...")
         time.sleep(0.5)
 
         role_results: dict[str, str] = {}
@@ -71,7 +79,7 @@ def run_moe(client, cfg, name, ts_code, analyses: dict) -> None:
             st.write(f"  ✓ {role['badge']} 观点已提交")
             time.sleep(0.3)
 
-        st.write("👔 首席执行官正在综合四方观点，做最终裁决...")
+        st.write("👔 首席执行官正在综合五方观点，做最终裁决...")
         time.sleep(0.4)
 
         roles_text = "\n\n".join(
@@ -81,7 +89,7 @@ def run_moe(client, cfg, name, ts_code, analyses: dict) -> None:
 
         ceo_prompt = f"""标的：{name}（{code6}）
 
-## 四位专家观点
+## 五位专家观点
 {roles_text}
 
 ## 原始分析摘要
@@ -90,6 +98,7 @@ def run_moe(client, cfg, name, ts_code, analyses: dict) -> None:
 ---
 综合以上信息给出最终操作裁决。
 ⚠️ **散户（韭菜代表）的观点是反向指标，逆向参考。**
+💡 **特别关注价值投机手的「三维共振」判断，若基本面+题材+技术三者不共振，需降级评价。**
 
 ## 🎯 最终操作结论
 

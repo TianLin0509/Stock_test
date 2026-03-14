@@ -400,6 +400,243 @@ def get_dragon_tiger(ts_code: str) -> tuple[str, str | None]:
         return "龙虎榜暂不可用", f"龙虎榜：{e}"
 
 
+@st.cache_data(ttl=600, show_spinner=False)
+def get_valuation_history(ts_code: str, years: int = 5) -> tuple[pd.DataFrame, str | None]:
+    """获取历史估值数据（PE_TTM, PB, PS_TTM），用于分位图"""
+    def _tushare():
+        if _pro is None:
+            return pd.DataFrame(), _ts_err
+        df = _retry_call(
+            lambda: _pro.daily_basic(
+                ts_code=ts_code,
+                start_date=ndays_ago(years * 365),
+                end_date=today(),
+                fields="trade_date,pe_ttm,pb,ps_ttm,close"
+            ),
+            retries=3, delay=1,
+        )
+        if df is not None and not df.empty:
+            df = df.sort_values("trade_date").reset_index(drop=True)
+            # 过滤掉异常值（负值或极端值）
+            for col in ["pe_ttm", "pb", "ps_ttm"]:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors="coerce")
+            return df, None
+        return pd.DataFrame(), "未获取到历史估值数据"
+
+    def _akshare():
+        try:
+            import akshare as ak
+            code6 = to_code6(ts_code)
+            df = ak.stock_a_lg_indicator(symbol=code6)
+            if df is not None and not df.empty:
+                df = df.rename(columns={
+                    "trade_date": "trade_date", "pe": "pe_ttm", "pb": "pb", "ps": "ps_ttm"
+                })
+                for col in ["pe_ttm", "pb", "ps_ttm"]:
+                    if col in df.columns:
+                        df[col] = pd.to_numeric(df[col], errors="coerce")
+                df = df.tail(years * 250).reset_index(drop=True)
+                return df, None
+        except Exception:
+            pass
+        return pd.DataFrame(), "akshare 无历史估值数据"
+
+    return _try_with_fallback(_tushare, _akshare, None, label="历史估值")
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def get_northbound_flow(ts_code: str) -> tuple[str, str | None]:
+    """获取北向资金持仓变化"""
+    def _tushare():
+        if _pro is None:
+            return "", _ts_err
+        try:
+            df = _retry_call(
+                lambda: _pro.hk_hold(
+                    ts_code=ts_code,
+                    start_date=ndays_ago(60),
+                    end_date=today(),
+                    fields="trade_date,ts_code,name,vol,ratio,exchange"
+                ),
+                retries=3, delay=1,
+            )
+            if df is not None and not df.empty:
+                df = df.sort_values("trade_date")
+                return f"北向资金持仓（近60日）：\n{df.tail(20).to_string(index=False)}", None
+            return "暂无北向资金持仓数据", None
+        except Exception as e:
+            return "", f"北向资金：{e}"
+
+    def _akshare():
+        try:
+            import akshare as ak
+            code6 = to_code6(ts_code)
+            df = ak.stock_hsgt_individual_em(symbol=code6)
+            if df is not None and not df.empty:
+                df = df.tail(20)
+                return f"北向资金持仓（近20日）：\n{df.to_string(index=False)}", None
+        except Exception:
+            pass
+        return "北向资金数据暂不可用", None
+
+    return _try_with_fallback(_tushare, _akshare, None, label="北向资金")
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def get_margin_trading(ts_code: str) -> tuple[str, str | None]:
+    """获取融资融券数据"""
+    def _tushare():
+        if _pro is None:
+            return "", _ts_err
+        try:
+            df = _retry_call(
+                lambda: _pro.margin_detail(
+                    ts_code=ts_code,
+                    start_date=ndays_ago(30),
+                    end_date=today(),
+                    fields="trade_date,rzye,rzmre,rzche,rqye,rqmcl,rqchl"
+                ),
+                retries=3, delay=1,
+            )
+            if df is not None and not df.empty:
+                df = df.sort_values("trade_date")
+                return f"融资融券（近30日）：\n{df.tail(15).to_string(index=False)}", None
+            return "暂无融资融券数据", None
+        except Exception as e:
+            return "", f"融资融券：{e}"
+
+    def _akshare():
+        try:
+            import akshare as ak
+            code6 = to_code6(ts_code)
+            df = ak.stock_margin_detail_info(code=code6)
+            if df is not None and not df.empty:
+                df = df.tail(15)
+                return f"融资融券（近15日）：\n{df.to_string(index=False)}", None
+        except Exception:
+            pass
+        return "融资融券数据暂不可用", None
+
+    return _try_with_fallback(_tushare, _akshare, None, label="融资融券")
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def get_sector_peers(ts_code: str) -> tuple[str, str | None]:
+    """获取同行业个股列表及基本估值，用于板块对比"""
+    df_list, _ = load_stock_list()
+    if df_list.empty:
+        return "", "股票列表不可用"
+
+    # 找到目标股的行业
+    m = df_list[df_list["ts_code"] == ts_code]
+    if m.empty or not m.iloc[0].get("industry"):
+        return "", "无法确定所属行业"
+
+    industry = m.iloc[0]["industry"]
+    peers = df_list[df_list["industry"] == industry].head(20)
+
+    if peers.empty or len(peers) <= 1:
+        return f"行业：{industry}，同业个股数据不足", None
+
+    # 尝试获取同行估值数据
+    if _pro is not None:
+        try:
+            codes = ",".join(peers["ts_code"].tolist()[:10])
+            df_val = _retry_call(
+                lambda: _pro.daily_basic(
+                    ts_code=codes,
+                    trade_date=today(),
+                    fields="ts_code,close,pe_ttm,pb,total_mv,turnover_rate"
+                ),
+                retries=2, delay=1,
+            )
+            if df_val is not None and not df_val.empty:
+                # 合并名称
+                df_val = df_val.merge(
+                    peers[["ts_code", "name"]], on="ts_code", how="left"
+                )
+                df_val = df_val.sort_values("total_mv", ascending=False)
+                return (f"行业：{industry}\n同行业个股估值对比（按市值排序）：\n"
+                        f"{df_val.to_string(index=False)}"), None
+        except Exception:
+            pass
+
+    # 兜底：只返回名称列表
+    names = peers["name"].tolist()[:10]
+    return f"行业：{industry}\n同行业个股：{'、'.join(names)}", None
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def get_holders_info(ts_code: str) -> tuple[str, str | None]:
+    """获取十大股东信息"""
+    if _pro is None:
+        return "", "Tushare 不可用"
+    try:
+        df = _retry_call(
+            lambda: _pro.top10_holders(
+                ts_code=ts_code,
+                fields="ann_date,end_date,holder_name,hold_amount,hold_ratio"
+            ),
+            retries=3, delay=1,
+        )
+        if df is not None and not df.empty:
+            # 取最新一期
+            latest = df[df["end_date"] == df["end_date"].max()]
+            return (f"十大股东（截至 {latest.iloc[0]['end_date']}）：\n"
+                    f"{latest.to_string(index=False)}"), None
+        return "暂无十大股东数据", None
+    except Exception as e:
+        return "", f"十大股东：{e}"
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def get_pledge_info(ts_code: str) -> tuple[str, str | None]:
+    """获取股权质押统计"""
+    if _pro is None:
+        return "", "Tushare 不可用"
+    try:
+        df = _retry_call(
+            lambda: _pro.pledge_stat(
+                ts_code=ts_code,
+                fields="end_date,pledge_count,unrest_pledge,rest_pledge,total_share,pledge_ratio"
+            ),
+            retries=3, delay=1,
+        )
+        if df is not None and not df.empty:
+            latest = df.iloc[0]
+            ratio = latest.get("pledge_ratio", "N/A")
+            return (f"股权质押统计（截至 {latest.get('end_date', 'N/A')}）：\n"
+                    f"质押笔数={latest.get('pledge_count', 'N/A')}  "
+                    f"质押比例={ratio}%\n"
+                    f"{df.head(5).to_string(index=False)}"), None
+        return "暂无质押数据", None
+    except Exception as e:
+        return "", f"质押数据：{e}"
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def get_fund_holdings(ts_code: str) -> tuple[str, str | None]:
+    """获取基金持仓变动"""
+    if _pro is None:
+        return "", "Tushare 不可用"
+    try:
+        # 获取最近两期基金持仓汇总
+        df = _retry_call(
+            lambda: _pro.fund_portfolio(
+                ts_code=ts_code,
+                fields="ann_date,end_date,symbol,mkv,amount,stk_mkv_ratio"
+            ),
+            retries=3, delay=1,
+        )
+        if df is not None and not df.empty:
+            return (f"基金持仓情况（近两期）：\n"
+                    f"{df.head(20).to_string(index=False)}"), None
+        return "暂无基金持仓数据", None
+    except Exception as e:
+        return "", f"基金持仓：{e}"
+
+
 def price_summary(df: pd.DataFrame) -> str:
     """生成K线数据的文本摘要，供AI分析使用"""
     if df.empty:

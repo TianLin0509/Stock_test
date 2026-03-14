@@ -8,6 +8,9 @@ from ai.prompts import (
     build_expectation_prompt,
     build_trend_prompt,
     build_fundamentals_prompt,
+    build_sentiment_prompt,
+    build_sector_prompt,
+    build_holders_prompt,
 )
 from data.tushare_client import price_summary, to_code6
 
@@ -61,6 +64,8 @@ def start_analysis(session_state, key: str, client, cfg, model_name: str):
     fin    = session_state.get("stock_fin", "")
     cap    = session_state.get("stock_cap", "")
     dragon = session_state.get("stock_dragon", "")
+    northbound = session_state.get("stock_northbound", "")
+    margin = session_state.get("stock_margin", "")
     analyses = dict(session_state.get("analyses", {}))
 
     # 获取 price_df 的副本
@@ -69,16 +74,31 @@ def start_analysis(session_state, key: str, client, cfg, model_name: str):
     if not df.empty:
         df = df.copy()
 
+    # 额外数据（板块/股东）
+    holders  = session_state.get("stock_holders", "")
+    pledge   = session_state.get("stock_pledge", "")
+    fund_hold = session_state.get("stock_fund_holdings", "")
+    sector   = session_state.get("stock_sector_peers", "")
+
     # 选择对应的分析函数
     if key == "expectation":
         target = _run_expectation
         args = (job, client, cfg, model_name, name, tscode, info)
     elif key == "trend":
         target = _run_trend
-        args = (job, client, cfg, model_name, name, tscode, df, cap, dragon)
+        args = (job, client, cfg, model_name, name, tscode, df, cap, dragon, northbound, margin)
     elif key == "fundamentals":
         target = _run_fundamentals
         args = (job, client, cfg, model_name, name, tscode, info, fin)
+    elif key == "sentiment":
+        target = _run_sentiment
+        args = (job, client, cfg, model_name, name, tscode, info)
+    elif key == "sector":
+        target = _run_sector
+        args = (job, client, cfg, model_name, name, tscode, info, sector)
+    elif key == "holders":
+        target = _run_holders
+        args = (job, client, cfg, model_name, name, tscode, info, holders, pledge, fund_hold)
     elif key == "moe":
         target = _run_moe
         args = (job, client, cfg, model_name, name, tscode, analyses)
@@ -141,7 +161,8 @@ def _run_expectation(job, client, cfg, model_name, name, tscode, info):
         job["status"] = "done"
 
 
-def _run_trend(job, client, cfg, model_name, name, tscode, df, cap, dragon):
+def _run_trend(job, client, cfg, model_name, name, tscode, df, cap, dragon,
+               northbound="", margin=""):
     try:
         _log(job, f"📡 正在连接 {model_name}...")
         time.sleep(0.6)
@@ -154,8 +175,15 @@ def _run_trend(job, client, cfg, model_name, name, tscode, df, cap, dragon):
         time.sleep(0.3)
         _log(job, "🐉 检索龙虎榜数据...")
         time.sleep(0.3)
+        if northbound and northbound != "暂无北向资金持仓数据":
+            _log(job, "🌏 分析北向资金持仓变化...")
+            time.sleep(0.3)
+        if margin and margin != "暂无融资融券数据":
+            _log(job, "📊 分析融资融券趋势...")
+            time.sleep(0.3)
         _log(job, "📐 构建技术分析框架（支撑位 / 压力位 / 形态识别）...")
-        p, s = build_trend_prompt(name, tscode, psmry, cap, dragon)
+        p, s = build_trend_prompt(name, tscode, psmry, cap, dragon,
+                                  northbound, margin)
         time.sleep(0.4)
         _log(job, "🤖 AI 正在研判趋势走向，通常需要 15~30 秒...")
         result, err = call_ai(client, cfg, p, system=s, max_tokens=8000)
@@ -214,7 +242,7 @@ def _run_moe(job, client, cfg, model_name, name, tscode, analyses):
         _log(job, "📋 汇总预期差、趋势、基本面三项分析结果...")
         time.sleep(0.5)
         context = build_analysis_context(analyses, max_per_module=15)
-        _log(job, "🏟️ 召集四方专家进入辩论会场...")
+        _log(job, "🏟️ 召集五方专家进入辩论会场...")
         time.sleep(0.5)
 
         role_results = {}
@@ -245,7 +273,7 @@ def _run_moe(job, client, cfg, model_name, name, tscode, analyses):
             _log(job, f"  ✓ {role['badge']} 观点已提交")
             time.sleep(0.3)
 
-        _log(job, "👔 首席执行官正在综合四方观点，做最终裁决...")
+        _log(job, "👔 首席执行官正在综合五方观点，做最终裁决...")
         time.sleep(0.4)
 
         roles_text = "\n\n".join(
@@ -255,7 +283,7 @@ def _run_moe(job, client, cfg, model_name, name, tscode, analyses):
 
         ceo_prompt = f"""标的：{name}（{code6}）
 
-## 四位专家观点
+## 五位专家观点
 {roles_text}
 
 ## 原始分析摘要
@@ -264,6 +292,7 @@ def _run_moe(job, client, cfg, model_name, name, tscode, analyses):
 ---
 综合以上信息给出最终操作裁决。
 ⚠️ **散户（韭菜代表）的观点是反向指标，逆向参考。**
+💡 **特别关注价值投机手的「三维共振」判断，若基本面+题材+技术三者不共振，需降级评价。**
 
 ## 🎯 最终操作结论
 
@@ -296,7 +325,7 @@ def _run_moe(job, client, cfg, model_name, name, tscode, analyses):
         if ceo_err:
             ceo_text = f"⚠️ CEO裁决生成失败：{ceo_err}\n\n建议切换其他模型后重新尝试。"
 
-        _log(job, "✅ MoE 四方辩论裁决完成！")
+        _log(job, "✅ MoE 五方辩论裁决完成！")
         job["moe_data"] = {"roles": role_results, "ceo": ceo_text, "done": True}
         job["result"] = "done"
         job["status"] = "done"
@@ -304,4 +333,101 @@ def _run_moe(job, client, cfg, model_name, name, tscode, analyses):
     except Exception as e:
         _log(job, f"❌ 异常：{e}")
         job["result"] = f"⚠️ MoE 辩论异常：{e}"
+        job["status"] = "done"
+
+
+def _run_sentiment(job, client, cfg, model_name, name, tscode, info):
+    try:
+        _log(job, f"📡 正在连接 {model_name}...")
+        time.sleep(0.6)
+        _log(job, f"🔍 搜索雪球（xueqiu.com）关于 {name} 的讨论...")
+        time.sleep(0.5)
+        _log(job, "🔍 搜索东方财富股吧热帖...")
+        time.sleep(0.4)
+        _log(job, "🔍 搜索同花顺、财联社等财经媒体...")
+        time.sleep(0.4)
+        _log(job, "🧹 过滤灌水/广告/无效内容，提取高质量讨论...")
+        p, s = build_sentiment_prompt(name, tscode, info)
+        time.sleep(0.4)
+        _log(job, "🤖 AI 正在分析舆情情绪，通常需要 20~40 秒...")
+        result, err = call_ai(client, cfg, p, system=s, max_tokens=8000)
+        if err:
+            _log(job, f"❌ 舆情分析失败：{err}")
+            job["result"] = f"⚠️ 舆情分析失败：{err}"
+            job["error"] = err
+            job["status"] = "done"
+            return
+        _log(job, "📝 整理舆情分析结论...")
+        time.sleep(0.3)
+        _log(job, "✅ 舆情情绪分析完成！")
+        job["result"] = result
+        job["status"] = "done"
+    except Exception as e:
+        _log(job, f"❌ 异常：{e}")
+        job["result"] = f"⚠️ 舆情分析异常：{e}"
+        job["status"] = "done"
+
+
+def _run_sector(job, client, cfg, model_name, name, tscode, info, sector_data):
+    try:
+        _log(job, f"📡 正在连接 {model_name}...")
+        time.sleep(0.6)
+        industry = info.get("行业", "未知")
+        _log(job, f"🏭 分析 {industry} 板块整体态势...")
+        time.sleep(0.5)
+        _log(job, f"🔍 联网搜索 {industry} 板块近期资金流向与催化事件...")
+        time.sleep(0.4)
+        _log(job, f"📊 对比 {name} 与同行业个股估值/走势...")
+        p, s = build_sector_prompt(name, tscode, info, sector_data)
+        time.sleep(0.4)
+        _log(job, "🤖 AI 正在进行板块联动分析，通常需要 15~30 秒...")
+        result, err = call_ai(client, cfg, p, system=s, max_tokens=8000)
+        if err:
+            _log(job, f"❌ 板块分析失败：{err}")
+            job["result"] = f"⚠️ 板块分析失败：{err}"
+            job["error"] = err
+            job["status"] = "done"
+            return
+        _log(job, "📝 整理板块分析结论...")
+        time.sleep(0.3)
+        _log(job, "✅ 板块联动分析完成！")
+        job["result"] = result
+        job["status"] = "done"
+    except Exception as e:
+        _log(job, f"❌ 异常：{e}")
+        job["result"] = f"⚠️ 板块分析异常：{e}"
+        job["status"] = "done"
+
+
+def _run_holders(job, client, cfg, model_name, name, tscode, info,
+                 holders_data, pledge_data, fund_data):
+    try:
+        _log(job, f"📡 正在连接 {model_name}...")
+        time.sleep(0.6)
+        _log(job, f"👥 分析 {name} 股东结构...")
+        time.sleep(0.5)
+        _log(job, "🔍 联网搜索最新减持/增持公告、解禁信息...")
+        time.sleep(0.4)
+        _log(job, "🏛️ 分析机构持仓变动趋势...")
+        time.sleep(0.4)
+        _log(job, "⚠️ 评估股权质押风险...")
+        p, s = build_holders_prompt(name, tscode, info, holders_data,
+                                     pledge_data, fund_data)
+        time.sleep(0.4)
+        _log(job, "🤖 AI 正在分析股东动向，通常需要 15~30 秒...")
+        result, err = call_ai(client, cfg, p, system=s, max_tokens=8000)
+        if err:
+            _log(job, f"❌ 股东分析失败：{err}")
+            job["result"] = f"⚠️ 股东分析失败：{err}"
+            job["error"] = err
+            job["status"] = "done"
+            return
+        _log(job, "📝 整理股东分析结论...")
+        time.sleep(0.3)
+        _log(job, "✅ 股东/机构动向分析完成！")
+        job["result"] = result
+        job["status"] = "done"
+    except Exception as e:
+        _log(job, f"❌ 异常：{e}")
+        job["result"] = f"⚠️ 股东分析异常：{e}"
         job["status"] = "done"

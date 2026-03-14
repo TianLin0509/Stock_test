@@ -1,4 +1,4 @@
-"""K线图渲染 — 同花顺经典风格（红涨绿跌）"""
+"""K线图渲染 — 浅色风格（红涨绿跌）"""
 
 import numpy as np
 import streamlit as st
@@ -9,31 +9,35 @@ from data.tushare_client import to_code6
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 同花顺经典配色
+# 浅色主题配色（红涨绿跌）
 # ══════════════════════════════════════════════════════════════════════════════
-_UP     = "#ee3333"   # 涨 — 同花顺红
-_DOWN   = "#00aa3b"   # 跌 — 同花顺绿
-_MA_CLR = {           # 均线经典色
+_UP     = "#ee3333"   # 涨 — 红
+_DOWN   = "#00aa3b"   # 跌 — 绿
+_MA_CLR = {
     5:  "#e8a633",    # MA5  — 黄
     10: "#33a3dc",    # MA10 — 蓝
     20: "#ee33ee",    # MA20 — 紫
-    30: "#33ee33",    # MA30 — 绿
-    60: "#aaaaaa",    # MA60 — 灰（主图用）
+    30: "#33bb33",    # MA30 — 绿
+    60: "#999999",    # MA60 — 灰
 }
-_BG      = "#1b1b1b"  # 深色背景
-_GRID    = "#2a2a2a"  # 网格
-_TEXT    = "#cccccc"   # 文字
-_MATCH_BORDER = "rgba(238,51,51,0.4)"
-_MATCH_BG     = "rgba(238,51,51,0.06)"
+_BG      = "#ffffff"  # 白色背景
+_PAPER   = "#fafafa"  # 浅灰纸面
+_GRID    = "#e8e8e8"  # 浅灰网格
+_TEXT    = "#333333"   # 深色文字
+_MATCH_BORDER = "rgba(30,100,220,0.5)"
+_MATCH_BG     = "rgba(30,100,220,0.06)"
+
+# 目标股叠加颜色 — 蓝/橙双色，与红绿形成强对比
+_TGT_UP   = "#ff8c00"   # 目标涨 — 橙色
+_TGT_DOWN = "#4169e1"   # 目标跌 — 皇家蓝
 
 
 def render_kline(df: pd.DataFrame, name: str, ts_code: str) -> None:
-    """主页 K 线图（同花顺经典暗色风格）"""
+    """主页 K 线图（浅色风格）"""
     if df.empty:
-        st.warning("⚠️ 暂无K线数据")
+        st.warning("暂无K线数据")
         return
     d = df.copy()
-    # 使用连续序号作为 x 轴，消除周末/节假日空档
     d = d.reset_index(drop=True)
     x_idx = list(range(len(d)))
     tick_vals = x_idx[::max(1, len(d)//8)]
@@ -67,8 +71,8 @@ def render_kline(df: pd.DataFrame, name: str, ts_code: str) -> None:
         line=dict(color=_MA_CLR[5], width=1.2), mode="lines", opacity=0.85,
     ), row=2, col=1)
 
-    _apply_ths_layout(fig, f"{name}（{to_code6(ts_code)}）日K线", 440,
-                      tick_vals, tick_text, show_legend=True)
+    _apply_layout(fig, f"{name}（{to_code6(ts_code)}）日K线", 440,
+                  tick_vals, tick_text, show_legend=True)
     st.plotly_chart(fig, use_container_width=True,
                     config={"displayModeBar": False, "responsive": True,
                             "scrollZoom": False})
@@ -88,7 +92,8 @@ def _fmt_date(d) -> str:
 def render_similar_case(case: dict, idx: int, target_df: pd.DataFrame = None,
                         k_days: int = 10) -> None:
     """
-    渲染单个相似走势案例 — 同花顺暗色风格 + 目标股叠加对比
+    渲染单个相似走势案例 — 浅色风格 + 目标股叠加对比
+    目标股用橙/蓝色 K 线叠加，与案例股红/绿形成鲜明对比
     """
     ctx = case["context_df"].copy()
     if ctx.empty:
@@ -126,7 +131,6 @@ def render_similar_case(case: dict, idx: int, target_df: pd.DataFrame = None,
     n = len(ctx)
     x_idx = list(range(n))
 
-    # 日期标签
     date_labels = [_fmt_date(d) for d in ctx["trade_date"].values]
     tick_vals = x_idx[::max(1, n // 6)]
     tick_text = [date_labels[i] for i in tick_vals]
@@ -134,7 +138,6 @@ def render_similar_case(case: dict, idx: int, target_df: pd.DataFrame = None,
     closes = ctx["close"].values.astype(float)
     opens = ctx["open"].values.astype(float)
 
-    # 计算均线
     ma_data = {}
     for p in [5, 10, 20, 30]:
         if len(closes) >= p:
@@ -149,7 +152,7 @@ def render_similar_case(case: dict, idx: int, target_df: pd.DataFrame = None,
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True,
                         vertical_spacing=0.03, row_heights=[0.70, 0.30])
 
-    # 案例股 K线
+    # 案例股 K线（红绿）
     fig.add_trace(go.Candlestick(
         x=x_idx, open=ctx["open"], high=ctx["high"],
         low=ctx["low"], close=ctx["close"],
@@ -167,7 +170,7 @@ def render_similar_case(case: dict, idx: int, target_df: pd.DataFrame = None,
                 line=dict(color=_MA_CLR[p], width=1.1), mode="lines",
             ), row=1, col=1)
 
-    # ── 叠加目标股 K线（仅匹配段区域）──────────────────────────────────
+    # ── 叠加目标股 K线（橙/蓝色，与红/绿形成对比）──────────────────────
     if target_df is not None and len(target_df) >= k_days:
         tgt = target_df.tail(k_days).reset_index(drop=True)
         tgt_close = tgt["收盘"].values.astype(float)
@@ -176,13 +179,11 @@ def render_similar_case(case: dict, idx: int, target_df: pd.DataFrame = None,
         tgt_low = tgt["最低"].values.astype(float)
         tgt_vol = tgt["成交量"].values.astype(float)
 
-        # 价格归一化：将目标股价格映射到案例股匹配段的价格范围
-        case_match_close = closes[match_start_idx:match_end_idx + 1]
+        # 价格归一化
         case_match_high = ctx["high"].values[match_start_idx:match_end_idx + 1].astype(float)
         case_match_low = ctx["low"].values[match_start_idx:match_end_idx + 1].astype(float)
 
-        if len(case_match_close) > 0 and len(tgt_close) > 0:
-            # 用价格范围做线性映射
+        if len(case_match_high) > 0 and len(tgt_close) > 0:
             case_min = float(case_match_low.min())
             case_max = float(case_match_high.max())
             tgt_min = float(tgt_low.min())
@@ -198,19 +199,18 @@ def render_similar_case(case: dict, idx: int, target_df: pd.DataFrame = None,
             mapped_low = _map_price(tgt_low)
             mapped_close = _map_price(tgt_close)
 
-            # x 坐标对齐到匹配段
             tgt_x = list(range(match_start_idx, match_start_idx + len(tgt_close)))
 
-            # 目标股 K线（半透明蓝色叠加）
+            # 目标股 K线 — 橙色涨 / 蓝色跌，粗线条，高辨识度
             fig.add_trace(go.Candlestick(
                 x=tgt_x, open=mapped_open, high=mapped_high,
                 low=mapped_low, close=mapped_close,
                 name="目标股(叠加)",
-                increasing=dict(line=dict(color="rgba(65,105,225,0.7)", width=1.5),
-                                fillcolor="rgba(65,105,225,0.25)"),
-                decreasing=dict(line=dict(color="rgba(65,105,225,0.7)", width=1.5),
-                                fillcolor="rgba(30,60,160,0.25)"),
-                whiskerwidth=0.3,
+                increasing=dict(line=dict(color=_TGT_UP, width=2),
+                                fillcolor="rgba(255,140,0,0.35)"),
+                decreasing=dict(line=dict(color=_TGT_DOWN, width=2),
+                                fillcolor="rgba(65,105,225,0.35)"),
+                whiskerwidth=0.6,
             ), row=1, col=1)
 
             # 成交量归一化叠加
@@ -218,11 +218,11 @@ def render_similar_case(case: dict, idx: int, target_df: pd.DataFrame = None,
             if case_match_vol.max() > 0 and tgt_vol.max() > 0:
                 vol_scale = case_match_vol.max() / tgt_vol.max()
                 mapped_vol = tgt_vol * vol_scale
-                tgt_vol_colors = ["rgba(65,105,225,0.45)" if c >= o else "rgba(30,60,160,0.45)"
+                tgt_vol_colors = [_TGT_UP if c >= o else _TGT_DOWN
                                   for c, o in zip(tgt_close, tgt_open)]
                 fig.add_trace(go.Bar(
                     x=tgt_x, y=mapped_vol, name="目标股成交量",
-                    marker_color=tgt_vol_colors, opacity=0.5,
+                    marker_color=tgt_vol_colors, opacity=0.4,
                 ), row=2, col=1)
 
     # 匹配段背景高亮
@@ -231,7 +231,7 @@ def render_similar_case(case: dict, idx: int, target_df: pd.DataFrame = None,
             x0=match_start_idx - 0.5, x1=match_end_idx + 0.5,
             fillcolor=_MATCH_BG, line_width=1, line_color=_MATCH_BORDER,
             annotation_text="匹配段", annotation_position="top left",
-            annotation_font_size=10, annotation_font_color="#ff6666",
+            annotation_font_size=10, annotation_font_color="#3366cc",
             row=1, col=1,
         )
         fig.add_vrect(
@@ -247,38 +247,259 @@ def render_similar_case(case: dict, idx: int, target_df: pd.DataFrame = None,
         marker_color=bar_colors, opacity=0.65,
     ), row=2, col=1)
 
-    _apply_ths_layout(fig, None, 420, tick_vals, tick_text, show_legend=True)
+    _apply_layout(fig, None, 420, tick_vals, tick_text, show_legend=True)
     st.plotly_chart(fig, use_container_width=True,
                     config={"displayModeBar": False, "responsive": True,
                             "scrollZoom": False})
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 同花顺经典布局
+# 价值投机雷达图
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _apply_ths_layout(fig, title, height, tick_vals, tick_text, show_legend=False):
-    """统一应用同花顺经典暗色布局"""
+def render_radar(signal: dict) -> None:
+    """渲染四维价值投机雷达图"""
+    categories = ["基本面强度", "题材正宗度", "技术启动度", "资金关注度"]
+    values = [
+        signal["fundamental"],
+        signal["catalyst"],
+        signal["technical"],
+        signal["capital"],
+    ]
+    # 闭合雷达图
+    values_closed = values + [values[0]]
+    categories_closed = categories + [categories[0]]
+
+    # 70分参考线
+    ref_line = [70] * 5
+
+    fig = go.Figure()
+
+    # 填充区域
+    fig.add_trace(go.Scatterpolar(
+        r=values_closed,
+        theta=categories_closed,
+        fill="toself",
+        fillcolor="rgba(99,102,241,0.15)",
+        line=dict(color="#6366f1", width=2.5),
+        name="当前评分",
+        marker=dict(size=8, color="#6366f1"),
+    ))
+
+    # 70分参考线
+    fig.add_trace(go.Scatterpolar(
+        r=ref_line,
+        theta=categories_closed,
+        fill=None,
+        line=dict(color="#f59e0b", width=1, dash="dot"),
+        name="共振线(70)",
+        marker=dict(size=0),
+    ))
+
+    fig.update_layout(
+        polar=dict(
+            radialaxis=dict(
+                visible=True, range=[0, 100],
+                tickvals=[20, 40, 60, 80, 100],
+                ticktext=["20", "40", "60", "80", "100"],
+                gridcolor="#e8e8e8",
+                tickfont=dict(size=9, color="#999"),
+            ),
+            angularaxis=dict(
+                tickfont=dict(size=12, color=_TEXT, family="'Noto Sans SC',sans-serif"),
+                gridcolor="#e8e8e8",
+            ),
+            bgcolor=_BG,
+        ),
+        template="plotly_white",
+        height=320, autosize=True,
+        paper_bgcolor=_PAPER,
+        margin=dict(t=30, b=10, l=60, r=60),
+        legend=dict(
+            orientation="h", y=-0.05, x=0.5, xanchor="center",
+            font=dict(size=10, color=_TEXT),
+        ),
+        dragmode=False,
+    )
+
+    st.plotly_chart(fig, use_container_width=True,
+                    config={"displayModeBar": False, "responsive": True})
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 估值历史分位图
+# ══════════════════════════════════════════════════════════════════════════════
+
+def render_valuation_bands(val_df: pd.DataFrame, name: str) -> None:
+    """渲染 PE/PB 历史分位图 — 面积图 + 当前值标记"""
+    if val_df.empty:
+        st.info("暂无历史估值数据")
+        return
+
+    df = val_df.copy()
+    # 确保有日期列
+    date_col = "trade_date" if "trade_date" in df.columns else df.columns[0]
+    df["date_str"] = df[date_col].astype(str)
+
+    metrics = []
+    if "pe_ttm" in df.columns and df["pe_ttm"].dropna().shape[0] > 50:
+        metrics.append(("pe_ttm", "PE(TTM)", "#6366f1"))
+    if "pb" in df.columns and df["pb"].dropna().shape[0] > 50:
+        metrics.append(("pb", "PB", "#ec4899"))
+
+    if not metrics:
+        st.info("估值数据不足，无法生成分位图")
+        return
+
+    tabs = st.tabs([label for _, label, _ in metrics])
+
+    for tab, (col, label, color) in zip(tabs, metrics):
+        with tab:
+            series = df[col].dropna()
+            if len(series) < 50:
+                st.info(f"{label} 数据不足")
+                continue
+
+            # 过滤极端值（保留1-99百分位内数据，用于更合理的展示）
+            q01, q99 = series.quantile(0.01), series.quantile(0.99)
+            mask = (df[col] >= q01) & (df[col] <= q99)
+            plot_df = df[mask].copy()
+
+            current_val = df[col].iloc[-1]
+            if pd.isna(current_val):
+                st.info(f"当前{label}值不可用")
+                continue
+
+            # 计算当前值所处的历史百分位
+            percentile = (series < current_val).sum() / len(series) * 100
+
+            # 百分位线
+            p10 = series.quantile(0.10)
+            p25 = series.quantile(0.25)
+            p50 = series.quantile(0.50)
+            p75 = series.quantile(0.75)
+            p90 = series.quantile(0.90)
+
+            # 估值状态判断
+            if percentile <= 20:
+                status = "极度低估"
+                status_color = "#16a34a"
+            elif percentile <= 40:
+                status = "相对低估"
+                status_color = "#22c55e"
+            elif percentile <= 60:
+                status = "估值适中"
+                status_color = "#f59e0b"
+            elif percentile <= 80:
+                status = "相对高估"
+                status_color = "#f97316"
+            else:
+                status = "极度高估"
+                status_color = "#ef4444"
+
+            # 指标卡片
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                st.metric(f"当前{label}", f"{current_val:.2f}")
+            with c2:
+                st.metric("历史分位", f"{percentile:.0f}%")
+            with c3:
+                st.markdown(
+                    f'<div style="text-align:center;padding-top:0.4rem;">'
+                    f'<span style="font-size:0.72rem;color:#9ca3af;">估值状态</span><br>'
+                    f'<span style="font-size:1.15rem;font-weight:800;color:{status_color};">{status}</span>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+
+            # 绘制面积图
+            x = list(range(len(plot_df)))
+            tick_step = max(1, len(x) // 6)
+            tick_vals = x[::tick_step]
+            tick_text = [plot_df["date_str"].iloc[i][:7] for i in tick_vals]  # YYYY-MM
+
+            fig = go.Figure()
+
+            # 填充区域：10-90百分位
+            fig.add_hline(y=p90, line_dash="dot", line_color="#fca5a5", line_width=0.8,
+                         annotation_text="90%", annotation_position="right")
+            fig.add_hline(y=p75, line_dash="dot", line_color="#fed7aa", line_width=0.8,
+                         annotation_text="75%", annotation_position="right")
+            fig.add_hline(y=p50, line_dash="dash", line_color="#e5e7eb", line_width=1,
+                         annotation_text="中位数", annotation_position="right")
+            fig.add_hline(y=p25, line_dash="dot", line_color="#bbf7d0", line_width=0.8,
+                         annotation_text="25%", annotation_position="right")
+            fig.add_hline(y=p10, line_dash="dot", line_color="#86efac", line_width=0.8,
+                         annotation_text="10%", annotation_position="right")
+
+            # 主线
+            fig.add_trace(go.Scatter(
+                x=x, y=plot_df[col].values, name=label,
+                line=dict(color=color, width=1.5), mode="lines",
+                fill="tozeroy", fillcolor=f"rgba({int(color[1:3],16)},{int(color[3:5],16)},{int(color[5:7],16)},0.08)",
+            ))
+
+            # 当前值标记
+            fig.add_trace(go.Scatter(
+                x=[x[-1]], y=[current_val],
+                mode="markers+text", name="当前",
+                marker=dict(color=status_color, size=10, symbol="diamond",
+                           line=dict(color="white", width=2)),
+                text=[f"{current_val:.2f}"],
+                textposition="top center",
+                textfont=dict(size=11, color=status_color, family="Nunito"),
+            ))
+
+            fig.update_layout(
+                template="plotly_white",
+                height=280, autosize=True,
+                plot_bgcolor=_BG, paper_bgcolor=_PAPER,
+                font=dict(family="'Noto Sans SC','Microsoft YaHei',sans-serif",
+                          color=_TEXT, size=10),
+                margin=dict(t=10, b=10, l=5, r=45),
+                hovermode="x unified",
+                dragmode=False,
+                legend=dict(visible=False),
+                xaxis=dict(
+                    type="linear", tickvals=tick_vals, ticktext=tick_text,
+                    gridcolor=_GRID, gridwidth=0.5, zeroline=False,
+                    tickfont=dict(size=9, color="#666"),
+                ),
+                yaxis=dict(
+                    gridcolor=_GRID, gridwidth=0.5, zeroline=False,
+                    tickfont=dict(size=9, color="#666"),
+                ),
+            )
+
+            st.plotly_chart(fig, use_container_width=True,
+                            config={"displayModeBar": False, "responsive": True})
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 浅色主题布局
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _apply_layout(fig, title, height, tick_vals, tick_text, show_legend=False):
+    """统一应用浅色主题布局"""
     fig.update_layout(
         title=dict(text=f"<b>{title}</b>" if title else "",
                    font=dict(size=12, color=_TEXT)) if title else {},
-        template="plotly_dark",
+        template="plotly_white",
         height=height, autosize=True,
         xaxis_rangeslider_visible=False,
-        plot_bgcolor=_BG, paper_bgcolor="#141414",
+        plot_bgcolor=_BG, paper_bgcolor=_PAPER,
         font=dict(family="'Noto Sans SC','Microsoft YaHei',sans-serif",
                   color=_TEXT, size=10),
         legend=dict(
             orientation="h", y=1.06, x=0,
             font=dict(size=9, color=_TEXT),
-            bgcolor="rgba(0,0,0,0)",
+            bgcolor="rgba(255,255,255,0.8)",
         ) if show_legend else dict(visible=False),
         margin=dict(t=35 if title else 25, b=10, l=5, r=5),
         hovermode="x unified",
         dragmode=False,
         bargap=0.15,
     )
-    # 连续 x 轴（用序号 + 自定义 tick 显示日期）
     for ax_name in ["xaxis", "xaxis2"]:
         fig.update_layout(**{
             ax_name: dict(
@@ -286,8 +507,8 @@ def _apply_ths_layout(fig, title, height, tick_vals, tick_text, show_legend=Fals
                 tickvals=tick_vals, ticktext=tick_text,
                 gridcolor=_GRID, gridwidth=0.5,
                 zeroline=False, showgrid=True,
-                tickfont=dict(size=9, color="#888"),
+                tickfont=dict(size=9, color="#666"),
             )
         })
     fig.update_yaxes(gridcolor=_GRID, gridwidth=0.5, zeroline=False,
-                     tickfont=dict(size=9, color="#888"))
+                     tickfont=dict(size=9, color="#666"))

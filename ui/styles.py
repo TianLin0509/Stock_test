@@ -158,6 +158,8 @@ html, body, [data-testid="stAppViewContainer"] {
 .r-quant   .role-badge { background: #e0e7ff; color: var(--blue); }
 .r-retail  { background: var(--orange-lt); border-color: #fed7aa; }
 .r-retail  .role-badge { background: #ffedd5; color: var(--orange); }
+.r-vspec   { background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%); border-color: #fcd34d; }
+.r-vspec   .role-badge { background: linear-gradient(135deg, #f59e0b, #d97706); color: #fff; box-shadow: 0 2px 8px rgba(245,158,11,0.3); }
 .r-ceo {
   background: linear-gradient(135deg, var(--purple-lt) 0%, var(--pink-lt) 100%);
   border-color: #d8b4fe;
