@@ -66,9 +66,15 @@ def _show_login():
 </div>
 """, unsafe_allow_html=True)
 
-    _, col_center, _ = st.columns([1, 2, 1])
-    with col_center:
-        st.markdown("#### 👤 请输入用户名登录")
+    st.markdown("""<div style="max-width:360px;margin:2rem auto;padding:1.5rem;
+        background:var(--bg-card);border:1px solid var(--border);border-radius:16px;
+        box-shadow:0 4px 24px rgba(99,102,241,0.12);">
+        <h4 style="text-align:center;margin:0 0 1rem;">👤 请输入用户名登录</h4>
+    </div>""", unsafe_allow_html=True)
+
+    # 用 columns 居中，但给足中间列宽度避免手机端溢出
+    _lc, _cc, _rc = st.columns([0.5, 3, 0.5])
+    with _cc:
         username = st.text_input(
             "用户名", placeholder="例如：呆瓜方、章鱼哥...",
             key="_login_username", label_visibility="collapsed",
