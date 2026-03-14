@@ -160,9 +160,13 @@ def start_analysis(session_state, key: str, client, cfg, model_name: str):
     job["_thread"] = thread
 
 
+_TIMEOUT = {"moe": 180}          # MoE 多轮对话给 3 分钟
+_TIMEOUT_DEFAULT = 120            # 单项分析 2 分钟
+
+
 def collect_result(session_state, key: str):
     """如果后台任务完成，将结果写入 analyses（主线程调用）
-    包含超时保护：running 超过 5 分钟自动标记失败。
+    包含超时保护：单项分析 2 分钟 / MoE 3 分钟。
     """
     import time as _time
     jobs = get_jobs(session_state)
@@ -170,11 +174,12 @@ def collect_result(session_state, key: str):
     if not job:
         return
 
-    # 超时保护：5 分钟
-    if job["status"] == "running" and _time.time() - job.get("_started_at", 0) > 300:
+    # 超时保护
+    timeout = _TIMEOUT.get(key, _TIMEOUT_DEFAULT)
+    if job["status"] == "running" and _time.time() - job.get("_started_at", 0) > timeout:
         job["status"] = "done"
         job["error"] = "分析超时"
-        job["result"] = "⚠️ AI 未在 5 分钟内响应，请切换模型重试。"
+        job["result"] = f"⚠️ AI 未在 {timeout} 秒内响应，请切换模型重试。"
 
     if job["status"] != "done":
         return
