@@ -159,18 +159,23 @@ def render_analysis_tab(client, cfg_now, selected_model, email_addr):
             unsafe_allow_html=True,
         )
 
-        # 缓存时显示"重新分析"按钮
+        # 缓存时显示"重新分析"按钮（与核心三项按钮同行，风格统一）
         if _shared_from and not any_running(st.session_state):
-            if st.button("🔄 忽略缓存，重新分析", key="btn_redo_fresh", type="secondary"):
+            if st.button("🔄 忽略缓存，重新分析", key="btn_redo_fresh",
+                         type="primary", use_container_width=True):
                 st.session_state.pop("_shared_from", None)
                 st.session_state["analyses"] = {}
                 st.session_state.pop("moe_results", None)
+                st.session_state.pop("similarity_results", None)
+                st.session_state.pop("_auto_sim", None)
+                st.session_state.pop("_analyses_saved_keys", None)
                 if client:
                     for key in CORE_KEYS:
                         start_analysis(st.session_state, key, client, cfg_now,
                                        selected_model)
                 st.session_state["active_view"] = "overview"
                 st.session_state["_skip_poll_sleep"] = True
+                st.session_state["_fast_rerun"] = True
                 st.rerun()
 
     st.markdown("---")
