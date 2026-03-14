@@ -15,6 +15,37 @@ from ui.charts import render_kline, render_valuation_bands
 from data.tushare_client import to_code6
 
 
+def _extract_conclusion(text: str, max_chars: int = 800) -> str:
+    """从分析全文中提取结论/总结段落，保留 markdown 格式"""
+    import re
+    # 按优先级尝试匹配结论段落标题
+    patterns = [
+        r'(#{1,4}\s*.*(?:综合结论|最终结论|总结|操作建议|投资建议).*)',
+        r'(#{1,4}\s*.*(?:三情景|概率估计|风险提示).*)',
+        r'(#{1,4}\s*.*(?:中线展望|短线展望|趋势研判).*)',
+        r'(#{1,4}\s*.*(?:基本面裁决|筛选结论|综合评分).*)',
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match:
+            # 从匹配位置截取到文末
+            start = match.start()
+            conclusion = text[start:start + max_chars]
+            if len(text) > start + max_chars:
+                conclusion += "\n\n..."
+            return conclusion
+
+    # 兜底：取最后 max_chars 字符（通常结论在末尾）
+    if len(text) > max_chars:
+        # 找一个段落分界
+        tail = text[-max_chars:]
+        newline_pos = tail.find('\n\n')
+        if newline_pos > 0 and newline_pos < max_chars // 2:
+            tail = tail[newline_pos + 2:]
+        return "...\n\n" + tail
+    return text
+
+
 def _show_stock_overview_basic():
     """显示股票概览：仅指标卡片"""
     name = st.session_state["stock_name"]
@@ -49,8 +80,8 @@ def render_analysis_tab(client, cfg_now, selected_model, email_addr):
         st.session_state["active_view"] = "overview"
     active_view = st.session_state["active_view"]
 
-    # ── 操作栏：3 按钮（预期差 / 趋势 / 基本面）──
-    _action_cols = st.columns(3)
+    # ── 操作栏：4 按钮（预期差 / 趋势 / 基本面 / 总结）──
+    _action_cols = st.columns(4)
 
     core_all_done = stock_ready and all(analyses.get(k) for k in CORE_KEYS)
     core_all_started = stock_ready and all(
@@ -95,6 +126,19 @@ def render_analysis_tab(client, cfg_now, selected_model, email_addr):
                 st.session_state["_skip_poll_sleep"] = True
                 st.session_state["_fast_rerun"] = True
                 st.rerun()
+
+    # Col 3: 总结按钮（核心三项完成后可用）
+    with _action_cols[3]:
+        _summary_type = "primary" if active_view == "summary" else "secondary"
+        if core_all_done:
+            _summary_label = "✅ 总结"
+        else:
+            _summary_label = "📊 总结"
+        if st.button(_summary_label, type=_summary_type,
+                     use_container_width=True, key="btn_summary",
+                     disabled=not core_all_done):
+            st.session_state["active_view"] = "summary"
+            st.rerun()
 
     # 深度分析按钮：仅在核心三项完成后显示（独立行）
     if core_all_done or deep_any_running or deep_all_done:
@@ -192,6 +236,8 @@ def render_analysis_tab(client, cfg_now, selected_model, email_addr):
             _render_trend(analyses)
         elif active_view == "fundamentals":
             _render_fundamentals(analyses)
+        elif active_view == "summary":
+            _render_summary(analyses)
 
     # ── 邮件推送（所有视图共享）──────────────────────────
     if email_addr and analyses and not any_running(st.session_state):
@@ -303,8 +349,6 @@ def _render_overview(client, cfg_now, analyses, core_all_done, current_user):
   ⚠️ <strong>AI 模型暂不可用</strong>：{ai_err}，请在左侧切换其他模型。
 </div>""", unsafe_allow_html=True)
 
-    if core_all_done:
-        render_radar_section()
 
 
 def _render_expectation(analyses):
@@ -428,3 +472,36 @@ def _render_fundamentals(analyses):
             st.markdown(analyses["holders"])
     elif is_running(st.session_state, "holders"):
         _show_job_progress("holders", "股东/机构动向分析")
+
+
+def _render_summary(analyses):
+    """总结视图：价值投机雷达 + 三项核心分析结论提炼"""
+    name = st.session_state.get("stock_name", "")
+    ts_code = st.session_state.get("stock_code", "")
+
+    st.markdown(f"#### 📊 {name} · 投资总结")
+
+    # ── 价值投机雷达 ──
+    render_radar_section()
+
+    st.markdown("---")
+
+    # ── 三项核心结论摘要 ──
+    st.markdown(f"#### 📝 核心分析要点")
+
+    _summary_map = [
+        ("expectation", "🔍 预期差", "预期差分析"),
+        ("trend", "📈 趋势研判", "趋势解读"),
+        ("fundamentals", "📋 基本面", "基本面分析"),
+    ]
+
+    for key, title, fallback_label in _summary_map:
+        text = analyses.get(key, "")
+        if not text:
+            st.caption(f"{title}：尚未完成")
+            continue
+
+        # 提取结论段落：优先找"综合结论""总结""操作建议"等关键段
+        conclusion = _extract_conclusion(text)
+        with st.expander(title, expanded=True):
+            st.markdown(conclusion)
