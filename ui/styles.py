@@ -180,7 +180,7 @@ html, body, [data-testid="stAppViewContainer"] {
   box-shadow: var(--shadow); line-height: 1.8; font-size: 0.92rem;
 }
 
-/* Buttons */
+/* Buttons — 通用 */
 .stButton button {
   border-radius: 50px !important;
   font-family: 'Nunito', sans-serif !important;
@@ -195,6 +195,34 @@ html, body, [data-testid="stAppViewContainer"] {
 .stButton button[kind="primary"]:hover {
   transform: translateY(-1px) !important;
   box-shadow: 0 6px 20px rgba(99,102,241,0.4) !important;
+}
+
+/* 操作按钮行：模仿 Tab 栏风格（桌面+手机通用） */
+[data-testid="stHorizontalBlock"]:has(.stButton) {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 50px;
+  padding: 4px;
+  gap: 2px !important;
+  box-shadow: var(--shadow);
+}
+[data-testid="stHorizontalBlock"]:has(.stButton) .stButton button {
+  border-radius: 50px !important;
+  font-family: 'Nunito', sans-serif !important;
+  font-weight: 600 !important;
+  font-size: 0.85rem !important;
+  padding: 6px 16px !important;
+  min-height: unset !important;
+  white-space: nowrap !important;
+}
+[data-testid="stHorizontalBlock"]:has(.stButton) .stButton button:not([kind="primary"]) {
+  background: transparent !important;
+  border: none !important;
+  color: var(--text-mid) !important;
+  box-shadow: none !important;
+}
+[data-testid="stHorizontalBlock"]:has(.stButton) .stButton button[kind="primary"] {
+  box-shadow: 0 2px 10px rgba(99,102,241,0.3) !important;
 }
 
 /* Input */
@@ -422,29 +450,28 @@ hr { border-color: var(--border) !important; margin: 1rem 0 !important; }
     width: 100% !important;
   }
 
-  /* 操作按钮行：保持单行横排，类似子标签 */
+  /* 操作按钮行：横排可滚动，与 Tab 栏同风格 */
   [data-testid="stHorizontalBlock"]:has(.stButton) {
     flex-wrap: nowrap !important;
-    gap: 0.15rem !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    border-radius: 12px !important;
+    padding: 3px !important;
+    gap: 1px !important;
+  }
+  [data-testid="stHorizontalBlock"]:has(.stButton)::-webkit-scrollbar {
+    display: none;
   }
   [data-testid="stHorizontalBlock"]:has(.stButton) > div[data-testid="column"] {
     flex: 1 1 auto !important;
     min-width: 0 !important;
     width: auto !important;
   }
-  /* 按钮：紧凑风格，与上级标签区分 */
   [data-testid="stHorizontalBlock"]:has(.stButton) .stButton button {
     font-size: 0.75rem !important;
-    padding: 0.3rem 0.4rem !important;
-    min-height: 34px !important;
-    border-radius: 20px !important;
-    white-space: nowrap !important;
-  }
-  [data-testid="stHorizontalBlock"]:has(.stButton) .stButton button:not([kind="primary"]) {
-    background: var(--bg-card) !important;
-    border: 1.5px solid var(--border) !important;
-    color: var(--text-mid) !important;
-    box-shadow: none !important;
+    padding: 5px 10px !important;
+    border-radius: 50px !important;
   }
 
   /* 指标卡片：每行2个 */
@@ -526,8 +553,7 @@ hr { border-color: var(--border) !important; margin: 1rem 0 !important; }
   /* 按钮更紧凑但保持横排 */
   [data-testid="stHorizontalBlock"]:has(.stButton) .stButton button {
     font-size: 0.68rem !important;
-    padding: 0.25rem 0.3rem !important;
-    min-height: 30px !important;
+    padding: 4px 7px !important;
   }
 }
 </style>

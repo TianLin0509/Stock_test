@@ -592,7 +592,7 @@ def main():
         active_view = st.session_state["active_view"]
 
         # ── 操作栏：5 按钮（一键分析 / 预期差 / 趋势 / 基本面 / 深度分析）──
-        _action_cols = st.columns([1.5, 1, 1, 1, 1.2])
+        _action_cols = st.columns(5)
 
         core_all_done = stock_ready and all(
             analyses.get(k) for k in core_keys
