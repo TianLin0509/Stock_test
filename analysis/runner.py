@@ -1,9 +1,8 @@
-"""后台分析任务调度 — 支持多个分析并发执行，不阻塞 UI"""
+"""同步分析执行 — 无轮询、无后台线程，直接返回结果"""
 
 import logging
-import threading
 import pandas as pd
-from ai.client import call_ai
+from ai.client import call_ai, add_tokens
 from ai.context import build_analysis_context
 from ai.prompts import (
     build_expectation_prompt,
@@ -18,58 +17,19 @@ from data.tushare_client import price_summary, to_code6
 logger = logging.getLogger(__name__)
 
 
-def _new_job() -> dict:
-    return {"status": "pending", "progress": [], "result": None, "error": None}
-
-
-def _log(job: dict, msg: str):
-    """向 job 追加进度消息"""
-    job["progress"].append(msg)
-
-
-def get_jobs(session_state) -> dict:
-    """获取或初始化 jobs 字典"""
-    if "_jobs" not in session_state:
-        session_state["_jobs"] = {}
-    return session_state["_jobs"]
-
-
-def is_running(session_state, key: str) -> bool:
-    jobs = get_jobs(session_state)
-    return jobs.get(key, {}).get("status") == "running"
-
-
-def is_done(session_state, key: str) -> bool:
-    jobs = get_jobs(session_state)
-    return jobs.get(key, {}).get("status") == "done"
-
-
-def any_running(session_state) -> bool:
-    jobs = get_jobs(session_state)
-    return any(j.get("status") == "running" for j in jobs.values())
-
-
-def running_count(session_state) -> int:
-    """当前正在运行的分析任务数"""
-    jobs = get_jobs(session_state)
-    return sum(1 for j in jobs.values() if j.get("status") == "running")
-
-
-MAX_CONCURRENT = 3  # 每用户最大并行分析数
-
-
 # ══════════════════════════════════════════════════════════════════════════════
-# 数据自取 + prompt 构建（在后台线程中运行，自行获取专属数据）
+# 数据自取 + prompt 构建
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _build_trend(job, name, tscode, df):
-    """趋势分析：线程内并行获取资金/龙虎榜/北向/融资融券数据"""
+def _build_trend(name, tscode, df, progress_cb=None):
+    """趋势分析：并行获取资金/龙虎榜/北向/融资融券数据"""
     from concurrent.futures import ThreadPoolExecutor, as_completed
     from data.tushare_client import (
         get_capital_flow, get_dragon_tiger,
         get_northbound_flow, get_margin_trading,
     )
-    _log(job, "📊 计算K线技术指标 & 并行获取资金数据...")
+    if progress_cb:
+        progress_cb("📊 计算K线技术指标 & 并行获取资金数据...")
     psmry = price_summary(df)
 
     _data_fns = {
@@ -88,223 +48,111 @@ def _build_trend(job, name, tscode, df):
     dragon, _ = _results["dragon"]
     nb, _ = _results["nb"]
     margin, _ = _results["margin"]
-    _log(job, "✅ 资金数据获取完成")
+    if progress_cb:
+        progress_cb("✅ 资金数据获取完成")
     return build_trend_prompt(name, tscode, psmry, cap, dragon, nb, margin)
 
 
-def _build_sector(job, name, tscode, info):
-    """板块分析：线程内获取同行业对比数据"""
+def _build_sector(name, tscode, info, progress_cb=None):
+    """板块分析：获取同行业对比数据"""
     from data.tushare_client import get_sector_peers
-    _log(job, "🏭 获取同行业个股对比数据...")
+    if progress_cb:
+        progress_cb("🏭 获取同行业个股对比数据...")
     sector_data, _ = get_sector_peers(tscode)
     return build_sector_prompt(name, tscode, info, sector_data)
 
 
-def _build_holders(job, name, tscode, info):
-    """股东分析：线程内获取股东/质押/基金持仓数据"""
+def _build_holders(name, tscode, info, progress_cb=None):
+    """股东分析：获取股东/质押/基金持仓数据"""
     from data.tushare_client import (
         get_holders_info, get_pledge_info, get_fund_holdings,
     )
-    _log(job, "👥 获取十大股东数据...")
+    if progress_cb:
+        progress_cb("👥 获取十大股东数据...")
     holders, _ = get_holders_info(tscode)
-    _log(job, "⚠️ 获取股权质押数据...")
+    if progress_cb:
+        progress_cb("⚠️ 获取股权质押数据...")
     pledge, _ = get_pledge_info(tscode)
-    _log(job, "🏛️ 获取基金持仓数据...")
+    if progress_cb:
+        progress_cb("🏛️ 获取基金持仓数据...")
     fund, _ = get_fund_holdings(tscode)
     return build_holders_prompt(name, tscode, info, holders, pledge, fund)
 
 
-def start_analysis(session_state, key: str, client, cfg, model_name: str):
-    """启动后台分析（如果尚未运行）"""
-    jobs = get_jobs(session_state)
+# ══════════════════════════════════════════════════════════════════════════════
+# 同步分析入口
+# ══════════════════════════════════════════════════════════════════════════════
 
-    # 已经在跑或已完成，不重复启动
-    if key in jobs and jobs[key]["status"] in ("running", "done"):
-        return
+def run_analysis_sync(key, client, cfg, model_name, name, tscode, info, fin, df,
+                      username="", progress_cb=None):
+    """同步分析：构建prompt → call_ai → 返回 (result, error)
 
-    # 并发限制
-    if running_count(session_state) >= MAX_CONCURRENT:
-        logger.info("[start_analysis] 已达并发上限 %d，排队等待: %s", MAX_CONCURRENT, key)
-        return
-
-    job = _new_job()
-    jobs[key] = job
-
-    # 从 session_state 读取通用数据（在主线程中读，传给子线程）
-    name   = session_state.get("stock_name", "")
-    tscode = session_state.get("stock_code", "")
-    info   = dict(session_state.get("stock_info", {}))
-    fin    = session_state.get("stock_fin", "")
-    analyses = dict(session_state.get("analyses", {}))
-
-    # 获取 price_df 的副本（仅趋势分析需要）
-    df = session_state.get("price_df", pd.DataFrame())
-    if not df.empty:
-        df = df.copy()
-
-    # 用户名（用于 token 归属）
-    username = session_state.get("current_user", "")
-
+    可从 ThreadPoolExecutor worker 调用（不要在 worker 中传 st.write 作为 progress_cb）。
+    """
     # 分析调度表：key → (label, build_fn, build_args)
-    # 趋势/板块/股东的 build 函数会在线程内自行获取专属数据
     dispatch = {
         "expectation":  ("预期差分析", build_expectation_prompt, (name, tscode, info)),
-        "trend":        ("K线趋势研判", _build_trend, (job, name, tscode, df)),
+        "trend":        ("K线趋势研判", _build_trend, (name, tscode, df)),
         "fundamentals": ("基本面剖析", build_fundamentals_prompt, (name, tscode, info, fin)),
         "sentiment":    ("舆情情绪分析", build_sentiment_prompt, (name, tscode, info)),
-        "sector":       ("板块联动分析", _build_sector, (job, name, tscode, info)),
-        "holders":      ("股东/机构动向分析", _build_holders, (job, name, tscode, info)),
+        "sector":       ("板块联动分析", _build_sector, (name, tscode, info)),
+        "holders":      ("股东/机构动向分析", _build_holders, (name, tscode, info)),
     }
 
-    if key in dispatch:
-        label, build_fn, build_args = dispatch[key]
-        target = _run_generic
-        args = (job, client, cfg, model_name, label, build_fn, build_args, username)
-    elif key == "moe":
-        target = _run_moe
-        args = (job, client, cfg, model_name, name, tscode, analyses, username)
-    else:
-        return
+    if key not in dispatch:
+        return None, f"未知分析类型: {key}"
 
-    import time as _time
-    thread = threading.Thread(target=target, args=args, daemon=True)
-    job["status"] = "running"
-    job["_started_at"] = _time.time()
-    thread.start()
-    job["_thread"] = thread
-
-
-_TIMEOUT = {"moe": 180}          # MoE 多轮对话给 3 分钟
-_TIMEOUT_DEFAULT = 120            # 单项分析 2 分钟
-
-
-def collect_result(session_state, key: str):
-    """如果后台任务完成，将结果写入 analyses（主线程调用）
-    包含超时保护：单项分析 2 分钟 / MoE 3 分钟。
-    """
-    import time as _time
-    jobs = get_jobs(session_state)
-    job = jobs.get(key)
-    if not job:
-        return
-
-    # 超时保护
-    timeout = _TIMEOUT.get(key, _TIMEOUT_DEFAULT)
-    if job["status"] == "running" and _time.time() - job.get("_started_at", 0) > timeout:
-        job["status"] = "done"
-        job["error"] = "分析超时"
-        job["result"] = f"⚠️ AI 未在 {timeout} 秒内响应，请切换模型重试。"
-
-    if job["status"] != "done":
-        return
-
-    if key == "moe":
-        # MoE 结果直接存在 job 里
-        if job.get("moe_data"):
-            session_state["moe_results"] = job["moe_data"]
-    else:
-        analyses = session_state.get("analyses", {})
-        if job["result"] and not analyses.get(key):
-            analyses[key] = job["result"]
-            session_state["analyses"] = analyses
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# 通用分析模板（在后台线程中执行，不能用 st.* 函数）
-# ══════════════════════════════════════════════════════════════════════════════
-
-def _run_generic(job, client, cfg, model_name, label, build_fn, build_args, username=""):
-    """通用分析流程：构建 prompt → 流式调用 AI → 逐块累积结果
-    job["partial_result"] 实时更新，前端每次 rerun 可展示已生成的内容。
-    流式开始前显示心跳消息，流式开始后心跳自动停止。
-    """
-    import time as _time
-    from ai.client import call_ai_stream, add_tokens
+    label, build_fn, build_args = dispatch[key]
 
     try:
-        _log(job, f"📡 正在连接 {model_name}...")
-        job["partial_result"] = " "   # 立即标记非空，让轮询走快速通道
-        p, s = build_fn(*build_args)
-        _log(job, f"🤖 AI 正在进行{label}...")
+        if progress_cb:
+            progress_cb(f"📡 正在连接 {model_name}...")
 
-        # 心跳：在流式第一个 chunk 到达前显示等待提示
-        _first_chunk = threading.Event()
-        _tips = [
-            "正在联网搜索最新资讯…",
-            "正在整理分析数据…",
-            "正在等待 AI 响应…",
-            "AI 正在思考中…",
-            "即将开始输出…",
-        ]
-
-        def _heartbeat():
-            elapsed = 0
-            idx = 0
-            max_beats = 10  # 最多 10 次心跳（40s），防止内存膨胀
-            while not _first_chunk.wait(timeout=4):
-                elapsed += 4
-                idx += 1
-                if idx > max_beats:
-                    break
-                tip = _tips[min(idx - 1, len(_tips) - 1)]
-                _log(job, f"⏱️ 已等待 {elapsed}s — {tip}")
-
-        hb = threading.Thread(target=_heartbeat, daemon=True)
-        hb.start()
-
-        # 流式调用，逐块累积到 partial_result
-        job["partial_result"] = ""
-        full_text = ""
-        has_error = False
-
-        for chunk in call_ai_stream(client, cfg, p, system=s, max_tokens=8000):
-            if not _first_chunk.is_set():
-                _first_chunk.set()  # 停止心跳
-            full_text += chunk
-            job["partial_result"] = full_text
-            if chunk.startswith("\n\n⚠️"):
-                has_error = True
-
-        _first_chunk.set()  # 确保心跳停止
-
-        # 流式完成后估算 token 用量（中文约 1.5 token/字）
-        if not has_error:
-            est_prompt = int(len(p) * 1.5)
-            est_completion = int(len(full_text) * 1.5)
-            add_tokens(
-                prompt_tokens=est_prompt,
-                completion_tokens=est_completion,
-                total_tokens=est_prompt + est_completion,
-                username=username,
-            )
-            _log(job, f"✅ {label}完成！")
-            job["result"] = full_text
+        # 趋势/板块/股东的 build 函数支持 progress_cb
+        if key in ("trend", "sector", "holders"):
+            p, s = build_fn(*build_args, progress_cb=progress_cb)
         else:
-            _log(job, f"❌ {label}失败")
-            job["result"] = full_text
-            job["error"] = full_text
+            p, s = build_fn(*build_args)
 
-        job["status"] = "done"
+        if progress_cb:
+            progress_cb(f"🤖 AI 正在进行{label}...")
+
+        text, err = call_ai(client, cfg, p, system=s, max_tokens=8000,
+                            username=username)
+
+        if err:
+            return None, err
+
+        if progress_cb:
+            progress_cb(f"✅ {label}完成！")
+
+        return text, None
+
     except Exception as e:
-        logger.debug("[_run_generic/%s] 异常: %s", label, e)
-        _log(job, f"❌ 异常：{e}")
-        job["result"] = f"⚠️ {label}异常：{e}"
-        job["status"] = "done"
+        logger.debug("[run_analysis_sync/%s] 异常: %s", key, e)
+        return None, f"{label}异常：{e}"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# MoE 辩论（多轮对话，保持独立函数）
+# MoE 同步辩论
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _run_moe(job, client, cfg, model_name, name, tscode, analyses, username=""):
+def run_moe_sync(client, cfg, model_name, name, tscode, analyses,
+                 username="", progress_cb=None):
+    """同步 MoE 辩论：返回 (moe_data, error)
+
+    moe_data = {"roles": {...}, "ceo": "...", "done": True}
+    """
     from concurrent.futures import ThreadPoolExecutor, as_completed
     from analysis.moe import MOE_ROLES, CEO_SYSTEM
     code6 = to_code6(tscode)
 
     try:
-        _log(job, "📋 汇总预期差、趋势、基本面三项分析结果...")
+        if progress_cb:
+            progress_cb("📋 汇总预期差、趋势、基本面三项分析结果...")
         context = build_analysis_context(analyses, max_per_module=15)
-        _log(job, "🏟️ 召集五方专家并行发表观点...")
+        if progress_cb:
+            progress_cb("🏟️ 召集五方专家并行发表观点...")
 
         def _call_role(role):
             prompt = f"""辩论标的：{name}（{code6}）
@@ -339,9 +187,11 @@ def _run_moe(job, client, cfg, model_name, name, tscode, analyses, username=""):
                 role, text = fut.result()
                 role_results[role["key"]] = text
                 done_count += 1
-                _log(job, f"  ✓ [{done_count}/{len(MOE_ROLES)}] {role['badge']} 观点已提交")
+                if progress_cb:
+                    progress_cb(f"  ✓ [{done_count}/{len(MOE_ROLES)}] {role['badge']} 观点已提交")
 
-        _log(job, "👔 首席执行官正在综合五方观点，做最终裁决...")
+        if progress_cb:
+            progress_cb("👔 首席执行官正在综合五方观点，做最终裁决...")
 
         roles_text = "\n\n".join(
             f"【{r['badge']}】\n{role_results.get(r['key'], '')}"
@@ -393,13 +243,12 @@ def _run_moe(job, client, cfg, model_name, name, tscode, analyses, username=""):
         if ceo_err:
             ceo_text = f"⚠️ CEO裁决生成失败：{ceo_err}\n\n建议切换其他模型后重新尝试。"
 
-        _log(job, "✅ MoE 五方辩论裁决完成！")
-        job["moe_data"] = {"roles": role_results, "ceo": ceo_text, "done": True}
-        job["result"] = "done"
-        job["status"] = "done"
+        if progress_cb:
+            progress_cb("✅ MoE 五方辩论裁决完成！")
+
+        moe_data = {"roles": role_results, "ceo": ceo_text, "done": True}
+        return moe_data, None
 
     except Exception as e:
-        logger.debug("[_run_moe] 异常: %s", e)
-        _log(job, f"❌ 异常：{e}")
-        job["result"] = f"⚠️ MoE 辩论异常：{e}"
-        job["status"] = "done"
+        logger.debug("[run_moe_sync] 异常: %s", e)
+        return None, f"MoE 辩论异常：{e}"

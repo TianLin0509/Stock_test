@@ -50,7 +50,6 @@ st.markdown(
 from config import (
     MODEL_CONFIGS, MODEL_NAMES, ADMIN_USERNAME,
     CORE_KEYS, DEEP_KEYS, ALL_ANALYSIS_KEYS,
-    POLL_INTERVAL, POLL_INTERVAL_IDLE, POLL_INTERVAL_WARMUP,
 )
 from ui.styles import inject_css
 from data.tushare_client import (
@@ -58,10 +57,7 @@ from data.tushare_client import (
     get_basic_info, get_price_df, get_financial, get_valuation_history,
 )
 from ai.client import get_ai_client, get_token_usage
-from analysis.runner import (
-    get_jobs, start_analysis, collect_result,
-    is_running, is_done, any_running,
-)
+from analysis.runner import run_analysis_sync
 from ui.sidebar import render_sidebar
 from ui.tabs import (
     render_analysis_tab, render_compare_tab, render_backtest_tab,
@@ -237,13 +233,6 @@ def main():
   ⚠️ <strong>Tushare 不可用</strong>，已自动切换备用数据源（akshare / 东方财富）。部分数据（龙虎榜）可能缺失。
 </div>""", unsafe_allow_html=True)
 
-    # ══════════════════════════════════════════════════════════════════════
-    # 收集已完成的后台任务结果（Phase 1.4: 仅在有活跃 job 时执行）
-    # ══════════════════════════════════════════════════════════════════════
-    if st.session_state.get("_jobs"):
-        for key in ALL_ANALYSIS_KEYS + ["moe"]:
-            collect_result(st.session_state, key)
-
     # ── 折叠时：展开按钮 + 简化状态 ──────────────────────────────────────
     _top10_pick = st.session_state.pop("_top10_pick", None)
     _fast_rerun_global = st.session_state.pop("_fast_rerun", False)
@@ -401,17 +390,12 @@ def main():
         if _top10_pick:
             st.session_state["query_input"] = _top10_pick
 
-        _any_analysis_running = any_running(st.session_state)
         _core_all_have = all(
             st.session_state.get("analyses", {}).get(k)
-            or is_running(st.session_state, k)
             for k in CORE_KEYS
         ) if st.session_state.get("stock_name") else False
 
-        if _any_analysis_running:
-            _go_label = "⏳ 分析中…"
-            _go_disabled = True
-        elif _core_all_have:
+        if _core_all_have:
             _go_label = "✅ 分析完成"
             _go_disabled = True
         else:
@@ -589,10 +573,8 @@ def main():
         _resolve_and_fetch(_pending_resolve)
         st.session_state["_last_query"] = _pending_resolve
         client, cfg_now, _ = get_ai_client(selected_model)
-        if client and _pending_key:
-            start_analysis(st.session_state, _pending_key, client, cfg_now, selected_model)
+        # 分析将在 analysis tab 中按需同步执行
         st.session_state["active_view"] = _pending_key or "overview"
-        st.session_state["_skip_poll_count"] = 2
         st.rerun()
 
     # ══════════════════════════════════════════════════════════════════════
@@ -621,14 +603,43 @@ def main():
                 st.session_state["_last_query"] = query
                 stock_ready = True
                 analyses = st.session_state.get("analyses", {})  # 刷新（可能已从归档恢复）
+            # 同步并行执行核心三项分析
             if client:
-                for key in CORE_KEYS:
-                    if not analyses.get(key) and not is_running(st.session_state, key):
-                        start_analysis(st.session_state, key, client, cfg_now,
-                                       selected_model)
+                keys_to_run = [k for k in CORE_KEYS if not analyses.get(k)]
+                if keys_to_run:
+                    from concurrent.futures import ThreadPoolExecutor, as_completed
+                    import pandas as _pd
+
+                    _name = st.session_state.get("stock_name", "")
+                    _tscode = st.session_state.get("stock_code", "")
+                    _info = dict(st.session_state.get("stock_info", {}))
+                    _fin = st.session_state.get("stock_fin", "")
+                    _df = st.session_state.get("price_df", _pd.DataFrame())
+                    if not _df.empty:
+                        _df = _df.copy()
+                    _username = st.session_state.get("current_user", "")
+
+                    _label_map = {"expectation": "预期差", "trend": "趋势", "fundamentals": "基本面"}
+
+                    with st.status(f"🚀 一键分析（{len(keys_to_run)}项）...", expanded=True) as _status:
+                        st.write(f"并行启动 {len(keys_to_run)} 项核心分析...")
+                        with ThreadPoolExecutor(max_workers=3) as pool:
+                            futures = {
+                                pool.submit(
+                                    run_analysis_sync, k, client, cfg_now, selected_model,
+                                    _name, _tscode, _info, _fin, _df, _username
+                                ): k for k in keys_to_run
+                            }
+                            for fut in as_completed(futures):
+                                k = futures[fut]
+                                result, err = fut.result()
+                                if not err and result:
+                                    analyses[k] = result
+                                    st.session_state["analyses"] = analyses
+                                st.write(f"{'✅' if not err else '❌'} {_label_map.get(k, k)} 完成")
+                        _status.update(label="✅ 分析完成！", state="complete")
+
             st.session_state["active_view"] = "overview"
-            st.session_state["_skip_poll_count"] = 2
-            st.session_state["_fast_rerun"] = True
             st.rerun()
 
     # ══════════════════════════════════════════════════════════════════════
@@ -655,14 +666,9 @@ def main():
         render_qa_tab(client, cfg_now, selected_model)
 
     # ══════════════════════════════════════════════════════════════════════
-    # 归档 + 自动刷新
+    # 增量归档（同步执行完成后检查）
     # ══════════════════════════════════════════════════════════════════════
     if stock_ready:
-        _was_running = st.session_state.get("_was_running", False)
-        _is_running_now = any_running(st.session_state)
-        st.session_state["_was_running"] = _is_running_now
-
-        # 增量归档
         _analyses_saved = st.session_state.get("_analyses_saved_keys", set())
         _analyses_now = set(k for k, v in analyses.items() if v and len(v) > 100)
         if _analyses_now - _analyses_saved:
@@ -672,32 +678,7 @@ def main():
                 st.session_state["_analyses_saved_keys"] = _analyses_now.copy()
                 st.session_state["_archive_gen"] = st.session_state.get("_archive_gen", 0) + 1
             except Exception as e:
-                logger.debug("[poll] 归档失败: %s", e)
-
-        # Phase 1.5: 自适应轮询频率
-        if _is_running_now:
-            _skip_count = st.session_state.get("_skip_poll_count", 0)
-            if _skip_count > 0:
-                st.session_state["_skip_poll_count"] = _skip_count - 1
-                st.rerun()
-            else:
-                jobs_dict = get_jobs(st.session_state)
-                _any_streaming = any(
-                    job.get("partial_result") for job in jobs_dict.values()
-                    if job.get("status") == "running"
-                )
-                if _any_streaming:
-                    time.sleep(POLL_INTERVAL)
-                else:
-                    import time as _t
-                    _now = _t.time()
-                    _any_warming = any(
-                        _now - job.get("_started_at", 0) < 5
-                        for job in jobs_dict.values()
-                        if job.get("status") == "running"
-                    )
-                    time.sleep(POLL_INTERVAL_WARMUP if _any_warming else POLL_INTERVAL_IDLE)
-                st.rerun()
+                logger.debug("[archive] 归档失败: %s", e)
 
 
 if __name__ == "__main__":

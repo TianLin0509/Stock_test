@@ -4,11 +4,9 @@ import streamlit as st
 import pandas as pd
 
 from config import CORE_KEYS, DEEP_KEYS, ALL_ANALYSIS_KEYS
-from analysis.runner import (
-    get_jobs, start_analysis, is_running, is_done, any_running,
-)
+from analysis.runner import run_analysis_sync
 from ui.results import (
-    _show_analysis_result, _show_job_progress,
+    _show_analysis_result,
     _show_similarity_section, render_radar_section,
 )
 from ui.charts import render_kline, render_valuation_bands
@@ -69,6 +67,73 @@ def _show_stock_overview_basic():
         with col: st.metric(label, str(val)[:14])
 
 
+def _run_single_analysis(key, label, client, cfg_now, selected_model, analyses):
+    """同步执行单个分析并更新 session_state"""
+    name = st.session_state.get("stock_name", "")
+    tscode = st.session_state.get("stock_code", "")
+    info = dict(st.session_state.get("stock_info", {}))
+    fin = st.session_state.get("stock_fin", "")
+    df = st.session_state.get("price_df", pd.DataFrame())
+    if not df.empty:
+        df = df.copy()
+    username = st.session_state.get("current_user", "")
+
+    with st.status(f"⏳ {label}...", expanded=True) as status:
+        st.write(f"📡 正在连接 {selected_model}...")
+        result, err = run_analysis_sync(
+            key, client, cfg_now, selected_model,
+            name, tscode, info, fin, df,
+            username=username,
+            progress_cb=lambda msg: st.write(msg),
+        )
+        if err:
+            status.update(label=f"❌ {label}失败", state="error")
+            st.error(f"分析失败：{err}")
+        else:
+            analyses[key] = result
+            st.session_state["analyses"] = analyses
+            status.update(label=f"✅ {label}完成！", state="complete")
+
+
+def _run_deep_analysis(client, cfg_now, selected_model, analyses):
+    """同步执行深度分析（舆情+板块+股东）"""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    name = st.session_state.get("stock_name", "")
+    tscode = st.session_state.get("stock_code", "")
+    info = dict(st.session_state.get("stock_info", {}))
+    fin = st.session_state.get("stock_fin", "")
+    df = st.session_state.get("price_df", pd.DataFrame())
+    if not df.empty:
+        df = df.copy()
+    username = st.session_state.get("current_user", "")
+
+    keys_to_run = [dk for dk in DEEP_KEYS if not analyses.get(dk)]
+    if not keys_to_run:
+        return
+
+    label_map = {"sentiment": "舆情情绪", "sector": "板块联动", "holders": "股东动向"}
+
+    with st.status(f"🔬 深度分析（{len(keys_to_run)}项）...", expanded=True) as status:
+        st.write(f"并行启动 {len(keys_to_run)} 项深度分析...")
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            futures = {
+                pool.submit(
+                    run_analysis_sync, k, client, cfg_now, selected_model,
+                    name, tscode, info, fin, df, username
+                ): k for k in keys_to_run
+            }
+            for fut in as_completed(futures):
+                k = futures[fut]
+                result, err = fut.result()
+                if not err and result:
+                    analyses[k] = result
+                    st.session_state["analyses"] = analyses
+                st.write(f"{'✅' if not err else '❌'} {label_map.get(k, k)} 完成")
+        st.session_state["_auto_sim"] = True
+        status.update(label="✅ 深度分析完成！", state="complete")
+
+
 def render_analysis_tab(client, cfg_now, selected_model, email_addr):
     """渲染智能分析 Tab 的全部内容"""
     stock_ready = bool(st.session_state.get("stock_name"))
@@ -84,11 +149,7 @@ def render_analysis_tab(client, cfg_now, selected_model, email_addr):
     _action_cols = st.columns(4)
 
     core_all_done = stock_ready and all(analyses.get(k) for k in CORE_KEYS)
-    core_all_started = stock_ready and all(
-        (analyses.get(k) or is_running(st.session_state, k)) for k in CORE_KEYS
-    )
     deep_all_done = all(analyses.get(k) for k in DEEP_KEYS)
-    deep_any_running = any(is_running(st.session_state, k) for k in DEEP_KEYS)
 
     # Col 0-2: 核心三项按钮
     _view_map = [
@@ -98,13 +159,10 @@ def render_analysis_tab(client, cfg_now, selected_model, email_addr):
     ]
     for col_idx, key, label, icon in _view_map:
         with _action_cols[col_idx]:
-            running = is_running(st.session_state, key)
             done = bool(analyses.get(key))
             _btn_type = "primary" if active_view == key else "secondary"
 
-            if running:
-                _btn_label = f"⏳ {label}"
-            elif done:
+            if done:
                 _btn_label = f"✅ {label}"
             else:
                 _btn_label = f"{icon} {label}"
@@ -114,18 +172,17 @@ def render_analysis_tab(client, cfg_now, selected_model, email_addr):
                          use_container_width=True, key=f"btn_{key}",
                          disabled=(not stock_ready and not query)):
                 st.session_state["active_view"] = key
-                if not done and not running:
+                if not done:
                     if not stock_ready and query:
                         # 需要先解析股票 — 委托回主模块
                         st.session_state["_pending_resolve"] = query
                         st.session_state["_pending_analysis_key"] = key
                         st.rerun()
                     if client and stock_ready:
-                        start_analysis(st.session_state, key, client, cfg_now,
-                                       selected_model)
-                st.session_state["_skip_poll_count"] = 2
-                st.session_state["_fast_rerun"] = True
-                st.rerun()
+                        _run_single_analysis(key, label, client, cfg_now, selected_model, analyses)
+                        st.rerun()
+                else:
+                    st.rerun()
 
     # Col 3: 总结按钮（核心三项完成后可用）
     with _action_cols[3]:
@@ -141,58 +198,38 @@ def render_analysis_tab(client, cfg_now, selected_model, email_addr):
             st.rerun()
 
     # 深度分析按钮：仅在核心三项完成后显示（独立行）
-    if core_all_done or deep_any_running or deep_all_done:
-        if deep_any_running:
-            st.button("⏳ 深度分析进行中…", disabled=True,
-                      use_container_width=True, key="btn_deep")
-        elif deep_all_done:
+    if core_all_done or deep_all_done:
+        if deep_all_done:
             st.button("✅ 舆情+板块+股东 深度分析已完成", disabled=True,
                       use_container_width=True, key="btn_deep")
         else:
             if st.button("🔬 开始深度分析（舆情+板块+股东）", use_container_width=True,
                          key="btn_deep", type="primary"):
                 if client:
-                    for dk in DEEP_KEYS:
-                        if not analyses.get(dk) and not is_running(st.session_state, dk):
-                            start_analysis(st.session_state, dk, client, cfg_now,
-                                           selected_model)
-                    st.session_state["_auto_sim"] = True
-                st.session_state["_skip_poll_count"] = 2
-                st.session_state["_fast_rerun"] = True
-                st.rerun()
+                    _run_deep_analysis(client, cfg_now, selected_model, analyses)
+                    st.rerun()
 
     # ── 紧凑状态栏 ──────────────────────────────────────────
     active_view = st.session_state.get("active_view", "overview")
     _name_map = {"expectation": "预期差", "trend": "趋势", "fundamentals": "基本面"}
 
-    if stock_ready and (any(analyses.get(k) for k in CORE_KEYS)
-                       or any(is_running(st.session_state, k) for k in CORE_KEYS)):
+    if stock_ready and any(analyses.get(k) for k in CORE_KEYS):
         _status_parts = []
         for k in CORE_KEYS:
             if analyses.get(k):
                 _status_parts.append(f'<span style="color:#16a34a;">✅{_name_map[k]}</span>')
-            elif is_running(st.session_state, k):
-                _status_parts.append(
-                    f'<span style="color:#6366f1;">'
-                    f'⏳{_name_map[k]}分析中<span class="loading-dots"></span></span>'
-                )
             else:
                 _status_parts.append(f'<span style="color:#9ca3af;">⬜{_name_map[k]}</span>')
 
         _deep_map = {"sentiment": "舆情", "sector": "板块", "holders": "股东"}
-        if deep_any_running or any(analyses.get(k) for k in DEEP_KEYS):
+        if any(analyses.get(k) for k in DEEP_KEYS):
             for dk in DEEP_KEYS:
                 if analyses.get(dk):
                     _status_parts.append(f'<span style="color:#16a34a;">✅{_deep_map[dk]}</span>')
-                elif is_running(st.session_state, dk):
-                    _status_parts.append(
-                        f'<span style="color:#6366f1;">'
-                        f'⏳{_deep_map[dk]}分析中<span class="loading-dots"></span></span>'
-                    )
 
-        # 缓存来源标识（紧跟状态栏，所有视图可见）
+        # 缓存来源标识
         _shared_from = st.session_state.get("_shared_from")
-        if _shared_from and not any_running(st.session_state):
+        if _shared_from:
             _status_parts.append(
                 f'<span style="color:#f59e0b;">📦 缓存 · {_shared_from}</span>'
             )
@@ -203,8 +240,8 @@ def render_analysis_tab(client, cfg_now, selected_model, email_addr):
             unsafe_allow_html=True,
         )
 
-        # 缓存时显示"重新分析"按钮（与核心三项按钮同行，风格统一）
-        if _shared_from and not any_running(st.session_state):
+        # 缓存时显示"重新分析"按钮
+        if _shared_from:
             if st.button("🔄 忽略缓存，重新分析", key="btn_redo_fresh",
                          type="primary", use_container_width=True):
                 st.session_state.pop("_shared_from", None)
@@ -214,12 +251,8 @@ def render_analysis_tab(client, cfg_now, selected_model, email_addr):
                 st.session_state.pop("_auto_sim", None)
                 st.session_state.pop("_analyses_saved_keys", None)
                 if client:
-                    for key in CORE_KEYS:
-                        start_analysis(st.session_state, key, client, cfg_now,
-                                       selected_model)
+                    _run_core_analysis_all(client, cfg_now, selected_model)
                 st.session_state["active_view"] = "overview"
-                st.session_state["_skip_poll_count"] = 2
-                st.session_state["_fast_rerun"] = True
                 st.rerun()
 
     st.markdown("---")
@@ -242,6 +275,41 @@ def render_analysis_tab(client, cfg_now, selected_model, email_addr):
     # 邮件推送已移至总结视图内
 
 
+def _run_core_analysis_all(client, cfg_now, selected_model):
+    """同步并行执行核心三项分析（用于重新分析按钮）"""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    name = st.session_state.get("stock_name", "")
+    tscode = st.session_state.get("stock_code", "")
+    info = dict(st.session_state.get("stock_info", {}))
+    fin = st.session_state.get("stock_fin", "")
+    df = st.session_state.get("price_df", pd.DataFrame())
+    if not df.empty:
+        df = df.copy()
+    username = st.session_state.get("current_user", "")
+    analyses = st.session_state.get("analyses", {})
+
+    label_map = {"expectation": "预期差", "trend": "趋势", "fundamentals": "基本面"}
+
+    with st.status("🚀 重新分析...", expanded=True) as status:
+        st.write(f"并行启动 {len(CORE_KEYS)} 项核心分析...")
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            futures = {
+                pool.submit(
+                    run_analysis_sync, k, client, cfg_now, selected_model,
+                    name, tscode, info, fin, df, username
+                ): k for k in CORE_KEYS
+            }
+            for fut in as_completed(futures):
+                k = futures[fut]
+                result, err = fut.result()
+                if not err and result:
+                    analyses[k] = result
+                    st.session_state["analyses"] = analyses
+                st.write(f"{'✅' if not err else '❌'} {label_map.get(k, k)} 完成")
+        status.update(label="✅ 分析完成！", state="complete")
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # 各视图的渲染函数
 # ══════════════════════════════════════════════════════════════════════════════
@@ -254,7 +322,7 @@ def _render_overview(client, cfg_now, analyses, core_all_done, current_user):
     # 归档缓存检查（无分析结果时自动恢复 / 加载他人结果）
     from utils.archive import find_recent, find_today_others, load_archive
 
-    if not analyses and not any_running(st.session_state):
+    if not analyses:
         _stock_code = st.session_state["stock_code"]
 
         # 用 session_state 缓存归档查询结果（Phase 1.3）
@@ -333,10 +401,8 @@ def _render_overview(client, cfg_now, analyses, core_all_done, current_user):
 
 def _render_expectation(analyses):
     """expectation 视图"""
-    _has_deep_exp = analyses.get("sentiment") or is_running(st.session_state, "sentiment")
-    if is_running(st.session_state, "expectation"):
-        _show_job_progress("expectation", "预期差分析")
-    elif analyses.get("expectation"):
+    _has_deep_exp = bool(analyses.get("sentiment"))
+    if analyses.get("expectation"):
         name = st.session_state.get("stock_name", "")
         if _has_deep_exp:
             with st.expander(f"🔍 {name} · 预期差分析结果", expanded=False):
@@ -354,8 +420,6 @@ def _render_expectation(analyses):
         st.markdown(f"#### 📣 {name} · 舆情情绪分析（深度）")
         with st.container(border=True):
             st.markdown(analyses["sentiment"])
-    elif is_running(st.session_state, "sentiment"):
-        _show_job_progress("sentiment", "舆情情绪分析")
 
 
 def _render_trend(analyses):
@@ -366,12 +430,7 @@ def _render_trend(analyses):
     _has_deep_trend = (st.session_state.get("_auto_sim")
                        or st.session_state.get("similarity_results"))
 
-    if is_running(st.session_state, "trend"):
-        if not _t_df.empty:
-            render_kline(_t_df, _t_name, _t_code)
-            st.markdown("---")
-        _show_job_progress("trend", "趋势解读分析")
-    elif analyses.get("trend"):
+    if analyses.get("trend"):
         if _has_deep_trend:
             with st.expander(f"📈 {_t_name} · 趋势解读结果（含K线图）", expanded=False):
                 if not _t_df.empty:
@@ -403,17 +462,9 @@ def _render_fundamentals(analyses):
     """fundamentals 视图（估值分位 + 基本面 + 板块 + 股东）"""
     _f_name = st.session_state.get("stock_name", "")
     _f_val_df = st.session_state.get("valuation_df", pd.DataFrame())
-    _has_deep_fund = (analyses.get("sector") or analyses.get("holders")
-                      or is_running(st.session_state, "sector")
-                      or is_running(st.session_state, "holders"))
+    _has_deep_fund = bool(analyses.get("sector") or analyses.get("holders"))
 
-    if is_running(st.session_state, "fundamentals"):
-        if not _f_val_df.empty:
-            st.markdown(f"#### 📊 {_f_name} · 估值历史分位")
-            render_valuation_bands(_f_val_df, _f_name)
-            st.markdown("---")
-        _show_job_progress("fundamentals", "基本面分析")
-    elif analyses.get("fundamentals"):
+    if analyses.get("fundamentals"):
         if _has_deep_fund:
             with st.expander(f"📋 {_f_name} · 基本面分析结果（含估值分位）", expanded=False):
                 if not _f_val_df.empty:
@@ -442,16 +493,12 @@ def _render_fundamentals(analyses):
         st.markdown(f"#### 🏭 {_f_name} · 板块联动分析（深度）")
         with st.container(border=True):
             st.markdown(analyses["sector"])
-    elif is_running(st.session_state, "sector"):
-        _show_job_progress("sector", "板块联动分析")
     # 深度股东追加
     if analyses.get("holders"):
         st.markdown("---")
         st.markdown(f"#### 👥 {_f_name} · 股东/机构动向（深度）")
         with st.container(border=True):
             st.markdown(analyses["holders"])
-    elif is_running(st.session_state, "holders"):
-        _show_job_progress("holders", "股东/机构动向分析")
 
 
 def _render_summary(analyses):
@@ -488,7 +535,7 @@ def _render_summary(analyses):
 
     # ── 邮件推送（小按钮）──
     email_addr = st.session_state.get("email_input", "")
-    if email_addr and not any_running(st.session_state):
+    if email_addr:
         st.markdown("---")
         if st.button("📧 发送报告到邮箱", key="send_email"):
             with st.spinner("正在发送..."):

@@ -1,10 +1,10 @@
-"""Tab 4: 🎯 六方会谈（MoE 多角色辩论）— 从 streamlit_app.py 提取"""
+"""Tab 4: 🎯 六方会谈（MoE 多角色辩论）— 同步执行"""
 
 import streamlit as st
 
 from config import CORE_KEYS
-from analysis.runner import start_analysis, is_running
-from ui.results import _show_job_progress, _render_moe_results
+from analysis.runner import run_moe_sync
+from ui.results import _render_moe_results
 
 
 def render_moe_tab(client, cfg_now, selected_model):
@@ -26,8 +26,6 @@ def render_moe_tab(client, cfg_now, selected_model):
         for k in CORE_KEYS:
             if analyses.get(k):
                 _done_labels.append(f"✅ {_lbl[k]}")
-            elif is_running(st.session_state, k):
-                _done_labels.append(f"⏳ {_lbl[k]}分析中…")
             else:
                 _missing_labels.append(_lbl[k])
         _progress_text = " &nbsp;|&nbsp; ".join(_done_labels)
@@ -46,9 +44,7 @@ def render_moe_tab(client, cfg_now, selected_model):
         st.markdown(f"#### 🎯 {_moe_name} · 六方会谈")
 
         moe_done = st.session_state.get("moe_results", {}).get("done", False)
-        if is_running(st.session_state, "moe"):
-            _show_job_progress("moe", "六方会谈辩论")
-        elif moe_done:
+        if moe_done:
             _render_moe_results()
         else:
             st.caption(
@@ -57,7 +53,22 @@ def render_moe_tab(client, cfg_now, selected_model):
             )
             if st.button("🎯 启动六方会谈", type="primary",
                          use_container_width=True, key="btn_moe_start"):
-                if client and not is_running(st.session_state, "moe"):
-                    start_analysis(st.session_state, "moe", client, cfg_now,
-                                   selected_model)
+                if client:
+                    name = st.session_state.get("stock_name", "")
+                    tscode = st.session_state.get("stock_code", "")
+                    username = st.session_state.get("current_user", "")
+
+                    with st.status("🎯 六方会谈...", expanded=True) as status:
+                        moe_data, err = run_moe_sync(
+                            client, cfg_now, selected_model,
+                            name, tscode, analyses,
+                            username=username,
+                            progress_cb=lambda msg: st.write(msg),
+                        )
+                        if err:
+                            status.update(label="❌ 六方会谈失败", state="error")
+                            st.error(f"六方会谈失败：{err}")
+                        else:
+                            st.session_state["moe_results"] = moe_data
+                            status.update(label="✅ 六方会谈完成！", state="complete")
                     st.rerun()

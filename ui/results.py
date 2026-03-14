@@ -1,53 +1,23 @@
-"""分析结果展示 — 读取后台任务进度和结果"""
+"""分析结果展示 — 同步模式，无轮询"""
 
 import time
 import streamlit as st
 import pandas as pd
 from analysis.moe import MOE_ROLES
-from analysis.runner import get_jobs, is_running, is_done, start_analysis
 from ai.client import call_ai
 from ai.context import build_analysis_context
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 进度/结果渲染工具
+# 结果渲染工具
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _show_job_progress(key: str, title: str):
-    """显示后台任务的实时进度（含流式部分内容）"""
-    jobs = get_jobs(st.session_state)
-    job = jobs.get(key, {})
-    status = job.get("status", "")
-    progress = job.get("progress", [])
-    partial = job.get("partial_result", "")
-
-    if status == "running":
-        if partial:
-            # 有流式内容 → 直接展示已生成的部分 + 光标动画
-            name = st.session_state.get("stock_name", "")
-            st.markdown(f"#### ⏳ {name} · {title}中…")
-            with st.container(border=True):
-                st.markdown(partial + " ▌")
-        else:
-            # 尚无内容 → 显示进度消息
-            label = f"⏳ {title}..."
-            with st.status(label, expanded=True, state="running"):
-                for msg in progress:
-                    st.write(msg)
-    elif status == "done" and job.get("error"):
-        with st.status(f"❌ {title}失败", expanded=True, state="error"):
-            for msg in progress:
-                st.write(msg)
-
-
 def _show_analysis_result(key: str, title: str, icon: str):
-    """显示分析结果：运行中显示进度，完成显示结果"""
+    """显示分析结果：已完成/未开始两态"""
     analyses = st.session_state.get("analyses", {})
     content = analyses.get(key, "")
 
-    if is_running(st.session_state, key):
-        _show_job_progress(key, title)
-    elif content:
+    if content:
         name = st.session_state.get("stock_name", "")
         st.markdown(f"#### {icon} {name} · {title}结果")
         with st.container(border=True):
@@ -109,9 +79,7 @@ def _show_moe_tab(client, cfg, model_name):
     analyses = st.session_state.get("analyses", {})
     moe_done = bool(st.session_state.get("moe_results", {}).get("done"))
 
-    if is_running(st.session_state, "moe"):
-        _show_job_progress("moe", "MoE 多方辩论")
-    elif moe_done:
+    if moe_done:
         _render_moe_results()
     else:
         # 检查前置条件
@@ -121,13 +89,7 @@ def _show_moe_tab(client, cfg, model_name):
         if not analyses.get("fundamentals"): missing.append("基本面分析")
 
         if missing:
-            running_keys = [k for k in ["expectation", "trend", "fundamentals"]
-                           if is_running(st.session_state, k)]
-            if running_keys:
-                st.info(f"前置分析正在进行中，完成后可启动 MoE 辩论")
-                _show_running_summary()
-            else:
-                st.warning(f"MoE 辩论需要先完成：{'、'.join(missing)}")
+            st.warning(f"MoE 辩论需要先完成：{'、'.join(missing)}")
         else:
             st.info("前置分析已完成，点击上方「🎯 MoE辩论」按钮启动")
 
@@ -212,9 +174,7 @@ def _show_all_tab(client, cfg, model_name):
         else:
             done = bool(analyses.get(key))
 
-        if is_running(st.session_state, key):
-            _show_job_progress(key, title)
-        elif done:
+        if done:
             if key == "moe":
                 _render_moe_results()
             else:
@@ -227,19 +187,6 @@ def _show_all_tab(client, cfg, model_name):
 
     # MoE 不再自动启动，需用户手动点击
 
-
-def _show_running_summary():
-    """显示正在运行的任务列表"""
-    jobs = get_jobs(st.session_state)
-    names = {"expectation": "预期差分析", "trend": "K线趋势", "fundamentals": "基本面",
-             "sentiment": "舆情分析", "sector": "板块联动", "holders": "股东动向",
-             "moe": "MoE辩论(5角色)"}
-    for key, name in names.items():
-        job = jobs.get(key, {})
-        if job.get("status") == "running":
-            progress = job.get("progress", [])
-            last_msg = progress[-1] if progress else "启动中..."
-            st.caption(f"⏳ {name}：{last_msg}")
 
 
 def _render_moe_results():

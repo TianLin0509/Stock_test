@@ -5,7 +5,7 @@ import time as _time
 import threading
 from openai import OpenAI, APIConnectionError, AuthenticationError, RateLimitError
 from config import MODEL_CONFIGS
-from ai.doubao import doubao_call, doubao_stream
+from ai.doubao import doubao_call
 
 _MAX_RETRIES = 3
 _RETRY_DELAYS = [2, 4, 8]  # 指数退避秒数
@@ -164,37 +164,3 @@ def call_ai(client: OpenAI, cfg: dict, prompt: str,
     return "", f"AI 调用失败（重试耗尽）：{last_err}"
 
 
-def call_ai_stream(client: OpenAI, cfg: dict, prompt: str,
-                   system: str = "", max_tokens: int = 8000):
-    """
-    流式调用 AI 模型，yield 文本片段。
-    豆包走 responses API 流式。
-    """
-    messages = _build_messages(prompt, system)
-
-    # 豆包专属路径
-    if cfg.get("provider") == "doubao" and cfg.get("supports_search"):
-        yield from doubao_stream(cfg, messages, max_tokens)
-        return
-
-    extra = _build_extra(cfg)
-    try:
-        stream = client.chat.completions.create(
-            model=cfg["model"],
-            messages=messages,
-            max_tokens=max_tokens,
-            stream=True,
-            **extra,
-        )
-        for chunk in stream:
-            if chunk.choices and chunk.choices[0].delta.content:
-                yield chunk.choices[0].delta.content
-
-    except AuthenticationError as e:
-        yield f"\n\n⚠️ API Key 认证失败：{str(e)[:200]}"
-    except RateLimitError:
-        yield "\n\n⚠️ 调用频率或额度超限，请稍后重试或切换其他模型"
-    except APIConnectionError as e:
-        yield f"\n\n⚠️ 网络连接失败：{e}"
-    except Exception as e:
-        yield f"\n\n⚠️ AI 调用异常：{str(e)[:120]}"
