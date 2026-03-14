@@ -73,8 +73,10 @@ def _fetch_stock_data(code6: str):
 
 def _deep_analyze_one(client, cfg, model_name: str,
                       code6: str, name: str, username: str = "") -> dict | None:
-    """对单只股票做完整深度分析（6维 + MoE），返回 shared_cache 格式的数据"""
-    from ai.client import call_ai
+    """对单只股票做完整深度分析（6维 + MoE），返回 shared_cache 格式的数据（含 tokens_used）"""
+    from ai.client import call_ai, get_token_usage
+    _t_before = get_token_usage()["total"]
+
     from ai.prompts import (
         build_expectation_prompt, build_trend_prompt,
         build_fundamentals_prompt, build_sentiment_prompt,
@@ -161,10 +163,12 @@ def _deep_analyze_one(client, cfg, model_name: str,
             stock_info=info,
         )
 
+        _t_after = get_token_usage()["total"]
         return {
             "analyses": analyses,
             "moe_results": moe_results,
             "stock_info": info,
+            "tokens_used": _t_after - _t_before,
         }
 
     except Exception as e:
@@ -379,13 +383,14 @@ def run_deep_top10(model_name: str = "🟤 豆包 · Seed 2.0 Mini",
         total = len(scored)
         _log(f"🔬 Phase 4: 全量深度分析（{total} 只，2路并发）...")
 
-        deep_results = {}  # code6 → {analyses, moe_results, ...}
+        deep_results = {}  # code6 → {analyses, moe_results, tokens_used, ...}
+        per_stock_tokens = {}  # code6 → tokens
         completed = 0
 
         def _analyze_one(row):
             code6 = str(row.get("代码", ""))
             name = str(row.get("股票名称", ""))
-            return code6, _deep_analyze_one(client, cfg, model_name, code6, name, username)
+            return code6, name, _deep_analyze_one(client, cfg, model_name, code6, name, username)
 
         with ThreadPoolExecutor(max_workers=2) as pool:
             futures = {
@@ -393,17 +398,19 @@ def run_deep_top10(model_name: str = "🟤 豆包 · Seed 2.0 Mini",
                 for _, row in scored.iterrows()
             }
             for future in as_completed(futures):
-                name = futures[future]
+                stock_name = futures[future]
                 completed += 1
                 try:
-                    code6, result = future.result()
+                    code6, name, result = future.result()
                     if result:
                         deep_results[code6] = result
-                        _log(f"  [{completed}/{total}] ✅ {name} 深度分析完成")
+                        stk_tokens = result.get("tokens_used", 0)
+                        per_stock_tokens[code6] = stk_tokens
+                        _log(f"  [{completed}/{total}] ✅ {name} 深度分析完成（{stk_tokens:,} token）")
                     else:
-                        _log(f"  [{completed}/{total}] ⚠️ {name} 深度分析部分失败")
+                        _log(f"  [{completed}/{total}] ⚠️ {stock_name} 深度分析部分失败")
                 except Exception as e:
-                    _log(f"  [{completed}/{total}] ❌ {name} 深度分析异常: {e}")
+                    _log(f"  [{completed}/{total}] ❌ {stock_name} 深度分析异常: {e}")
                 status["progress"].append(f"[深度] {completed}/{total}")
                 _write_status(status)
 
@@ -487,6 +494,7 @@ def run_deep_top10(model_name: str = "🟤 豆包 · Seed 2.0 Mini",
         status["tokens_used"] = tokens_used
         status["scored_count"] = len(scored)
         status["deep_count"] = len(deep_results)
+        status["per_stock_tokens"] = per_stock_tokens
         _write_status(status)
 
     except Exception as e:

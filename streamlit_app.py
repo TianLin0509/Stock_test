@@ -399,6 +399,30 @@ def main():
                 st.markdown(_top10_summary)
                 st.markdown("---")
             show_top10_cards(_top10_cached)
+
+            # Token 消耗小贴士（底部淡色显示）
+            _ds = get_deep_status()
+            if _ds and _ds.get("status") == "done" and _ds.get("tokens_used"):
+                _total_tk = _ds["tokens_used"]
+                _scored_n = _ds.get("scored_count", 0)
+                _deep_n = _ds.get("deep_count", 0)
+                _started = _ds.get("started", "")[:16].replace("T", " ")
+                _finished = _ds.get("finished", "")[:16].replace("T", " ")
+                if _total_tk >= 10000:
+                    _tk_str = f"{_total_tk / 10000:.1f}万"
+                else:
+                    _tk_str = f"{_total_tk:,}"
+                _avg = _total_tk // _deep_n if _deep_n else 0
+                st.markdown(
+                    f'<div style="text-align:center;color:#9ca3af;font-size:0.72rem;'
+                    f'margin-top:12px;padding:6px;border-top:1px solid #f1f5f9;">'
+                    f'🪙 本次分析共消耗 <b>{_tk_str}</b> token '
+                    f'（{_scored_n}只评分 + {_deep_n}只深度分析，'
+                    f'均值 {_avg:,}/只） · '
+                    f'{_started} ~ {_finished}'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
         elif is_deep_running():
             # 深度分析正在运行
             _deep_status = get_deep_status() or {}
