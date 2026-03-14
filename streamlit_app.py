@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-📈 呆瓜方后援会专属投研助手 v5
+📈 呆瓜方后援会专属投研助手 v5.1
 Multi-Model + Tushare · 模块化架构
 """
 
