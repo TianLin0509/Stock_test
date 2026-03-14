@@ -83,18 +83,19 @@ def render_backtest_tab():
             preview_rows.append({
                 "日期": a.get("date", a.get("archive_date", "")),
                 "股票": a.get("stock_name", ""),
-                "代码": a.get("stock_code", ""),
+                "_code": a.get("stock_code", ""),
                 "用户": a.get("username", ""),
-                "模型": str(a.get("model", ""))[:10],
+                "模型": str(a.get("model", "")),
                 "AI评级": rec["rating"],
                 "收盘价": a.get("close", "—"),
             })
         if preview_rows:
             df_preview = pd.DataFrame(preview_rows[::-1])
-            # 同日期+代码+模型去重，保留最后一条（最新评级）
+            # 同日期+股票+模型去重，保留最新评级
             df_preview = df_preview.drop_duplicates(
-                subset=["日期", "代码", "模型"], keep="first"
+                subset=["日期", "_code", "模型"], keep="first"
             )
+            df_preview = df_preview.drop(columns=["_code"])
             st.dataframe(df_preview, use_container_width=True, hide_index=True)
         return
 
