@@ -27,7 +27,11 @@ st.markdown(
 # ── 内部模块导入 ──────────────────────────────────────────────────────────
 from config import MODEL_CONFIGS, MODEL_NAMES
 from ui.styles import inject_css
-from ui.results import show_completed_results
+from ui.results import (
+    _show_analysis_result, _show_job_progress,
+    _render_moe_results, _show_similarity_section,
+    _render_free_question,
+)
 from data.tushare_client import (
     ts_ok, get_ts_error, get_data_source, resolve_stock, to_code6,
     get_basic_info, get_price_df, get_financial,
@@ -351,71 +355,31 @@ def main():
     search_btn = st.button("🔍 查询股票", type="primary", use_container_width=True)
 
     # ══════════════════════════════════════════════════════════════════════
-    # 功能按钮（根据后台任务状态显示标签）
+    # Tab 布局
     # ══════════════════════════════════════════════════════════════════════
     analyses = st.session_state.get("analyses", {})
     moe_done = bool(st.session_state.get("moe_results", {}).get("done"))
 
-    def _label(key, name, icon):
-        if is_running(st.session_state, key):
-            return f"⏳ {name}中..."
-        done = moe_done if key == "moe" else bool(analyses.get(key))
-        if done:
-            return f"✅ {name}完成"
-        return f"{icon} {name}"
-
-    # 主操作行：一键分析（突出）+ 自由提问
-    pr1, pr2, pr3 = st.columns([2, 1, 1])
-    with pr1:
-        btn_all = st.button("🚀 一键全面分析", type="primary", use_container_width=True)
-    with pr2:
-        btn_qa = st.button("💬 自由提问", use_container_width=True)
-    with pr3:
-        btn_mystic = st.button("🔮 玄学炒股", use_container_width=True)
-
-    # 单项分析行（核心三项 + MoE + K线匹配）
-    bc1, bc2, bc3, bc4, bc5 = st.columns(5)
-    with bc1:
-        btn_exp = st.button(_label("expectation", "预期差", "🔍"),
-                            use_container_width=True)
-    with bc2:
-        btn_trend = st.button(_label("trend", "K线趋势", "📈"),
-                              use_container_width=True)
-    with bc3:
-        btn_fund = st.button(_label("fundamentals", "基本面", "📋"),
-                             use_container_width=True)
-    with bc4:
-        btn_moe = st.button(_label("moe", "MoE辩论", "🎯"),
-                            use_container_width=True)
-    with bc5:
-        btn_sim = st.button("📐 K线匹配", use_container_width=True)
-
-    # 深度分析行（舆情 + 板块 + 股东）
-    dc1, dc2, dc3 = st.columns(3)
-    with dc1:
-        btn_sentiment = st.button(_label("sentiment", "舆情分析", "📣"),
-                                  use_container_width=True)
-    with dc2:
-        btn_sector = st.button(_label("sector", "板块联动", "🏭"),
-                               use_container_width=True)
-    with dc3:
-        btn_holders = st.button(_label("holders", "股东动向", "👥"),
-                                use_container_width=True)
+    tab_analysis, tab_compare, tab_qa, tab_mystic = st.tabs(
+        ["📊 智能分析", "⚖️ 股票对比", "💬 互动问答", "🔮 趣味玄学"]
+    )
 
     # ══════════════════════════════════════════════════════════════════════
     # 查询股票逻辑
     # ══════════════════════════════════════════════════════════════════════
     if search_btn and query:
-        # 保存上一轮分析到历史
         _save_analysis_to_history()
-
         for k in ["analyses", "moe_results", "stock_fin", "stock_cap",
                    "stock_dragon", "stock_northbound", "stock_margin",
                    "valuation_df", "stock_sector_peers", "stock_holders",
                    "stock_pledge", "stock_fund_holdings",
-                   "qa_history", "similarity_results",
+                   "qa_history", "similarity_results", "_show_sim",
                    "active_tab", "_jobs"]:
             st.session_state.pop(k, None)
+        # 清除重新分析确认状态
+        for k in list(st.session_state.keys()):
+            if k.startswith("_confirm_redo_"):
+                del st.session_state[k]
         st.session_state["analyses"] = {}
 
         with st.spinner("🔍 解析股票中..."):
@@ -496,142 +460,534 @@ def main():
 </div>""", unsafe_allow_html=True)
 
     # ══════════════════════════════════════════════════════════════════════
-    # 按钮响应
+    # 获取 AI 客户端（各 Tab 共用）
     # ══════════════════════════════════════════════════════════════════════
     stock_ready = bool(st.session_state.get("stock_name"))
-    any_btn = (btn_exp or btn_trend or btn_fund or btn_moe or btn_qa or btn_all
-               or btn_sim or btn_mystic or btn_sentiment or btn_sector or btn_holders)
+    client, cfg_now, ai_err = get_ai_client(selected_model)
 
-    # 玄学炒股不需要先查询股票，单独处理
-    if btn_mystic:
-        st.session_state["active_tab"] = "mystic"
+    # ── 辅助函数：带防误触的分析按钮 ─────────────────────────────────
+    def _analysis_button(key, label, icon, needs_prereq=False, prereq_keys=None):
+        """
+        渲染分析按钮，防误触 + 重新分析确认。
+        返回 True 表示应当启动该分析。
+        """
+        is_moe = (key == "moe")
+        done = moe_done if is_moe else bool(analyses.get(key))
+        running = is_running(st.session_state, key)
 
-    if any_btn and not btn_mystic and not stock_ready:
-        st.markdown("""<div class="status-banner warn">
-  ⚠️ <strong>请先点击「🔍 查询股票」获取数据</strong>，然后再进行分析。
-</div>""", unsafe_allow_html=True)
-        return
+        if running:
+            st.button(f"⏳ {label}中...", disabled=True, use_container_width=True,
+                      key=f"btn_{key}")
+            return False
 
-    if stock_ready:
-        # 获取 AI 客户端
-        client, cfg_now, ai_err = get_ai_client(selected_model)
-
-        # 处理按钮点击：设置 active_tab + 启动后台任务
-        if btn_exp:
-            st.session_state["active_tab"] = "expectation"
-            if client and not analyses.get("expectation") and not is_running(st.session_state, "expectation"):
-                start_analysis(st.session_state, "expectation", client, cfg_now, selected_model)
-                st.rerun()
-        elif btn_trend:
-            st.session_state["active_tab"] = "trend"
-            if client and not analyses.get("trend") and not is_running(st.session_state, "trend"):
-                start_analysis(st.session_state, "trend", client, cfg_now, selected_model)
-                st.rerun()
-        elif btn_fund:
-            st.session_state["active_tab"] = "fundamentals"
-            if client and not analyses.get("fundamentals") and not is_running(st.session_state, "fundamentals"):
-                start_analysis(st.session_state, "fundamentals", client, cfg_now, selected_model)
-                st.rerun()
-        elif btn_moe:
-            st.session_state["active_tab"] = "moe"
-            if client and not moe_done and not is_running(st.session_state, "moe"):
-                # MoE 需要前三项
-                missing = []
-                if not analyses.get("expectation"): missing.append("预期差")
-                if not analyses.get("trend"):       missing.append("趋势")
-                if not analyses.get("fundamentals"): missing.append("基本面")
-                if not missing:
-                    start_analysis(st.session_state, "moe", client, cfg_now, selected_model)
-                    st.rerun()
-        elif btn_sentiment:
-            st.session_state["active_tab"] = "sentiment"
-            if client and not analyses.get("sentiment") and not is_running(st.session_state, "sentiment"):
-                start_analysis(st.session_state, "sentiment", client, cfg_now, selected_model)
-                st.rerun()
-        elif btn_sector:
-            st.session_state["active_tab"] = "sector"
-            if client and not analyses.get("sector") and not is_running(st.session_state, "sector"):
-                start_analysis(st.session_state, "sector", client, cfg_now, selected_model)
-                st.rerun()
-        elif btn_holders:
-            st.session_state["active_tab"] = "holders"
-            if client and not analyses.get("holders") and not is_running(st.session_state, "holders"):
-                start_analysis(st.session_state, "holders", client, cfg_now, selected_model)
-                st.rerun()
-        elif btn_sim:
-            st.session_state["active_tab"] = "similarity"
-        elif btn_qa:
-            st.session_state["active_tab"] = "qa"
-        elif btn_all:
-            st.session_state["active_tab"] = "all"
-            if client:
-                for key in ["expectation", "trend", "fundamentals"]:
-                    if not analyses.get(key) and not is_running(st.session_state, key):
-                        start_analysis(st.session_state, key, client, cfg_now, selected_model)
-                st.rerun()
-
-        if ai_err and any_btn:
-            st.markdown(f"""<div class="status-banner warn">
-  ⚠️ <strong>AI 模型暂不可用</strong>：{ai_err}<br>
-  请在左侧切换其他模型。
-</div>""", unsafe_allow_html=True)
-
-        # ── 展示内容 ─────────────────────────────────────────────────
-        active_tab = st.session_state.get("active_tab", "")
-
-        if active_tab == "mystic":
-            _show_mystic(client, cfg_now, selected_model)
-        elif not active_tab:
-            _show_stock_overview()
-        else:
-            show_completed_results(client, cfg_now, selected_model)
-
-        # ── 邮件推送按钮（有分析结果时显示）──────────────────────────
-        if email_addr and analyses and not any_running(st.session_state):
-            has_any = any(analyses.get(k) for k in
-                         ["expectation", "trend", "fundamentals",
-                          "sentiment", "sector", "holders"])
-            if has_any:
-                st.markdown("---")
-                if st.button("📧 发送分析报告到邮箱", key="send_email"):
-                    with st.spinner("正在发送..."):
-                        from utils.email_sender import send_analysis_email
-                        ok, msg = send_analysis_email(
-                            email_addr,
-                            st.session_state.get("stock_name", ""),
-                            to_code6(st.session_state.get("stock_code", "")),
-                            st.session_state.get("stock_info", {}),
-                            analyses,
-                            st.session_state.get("moe_results", {}),
-                            selected_model,
-                        )
-                        if ok:
-                            st.success(f"✅ 已发送至 {email_addr}")
+        if done:
+            # 已完成：显示 ✅，点击弹出确认
+            confirm_key = f"_confirm_redo_{key}"
+            if st.session_state.get(confirm_key):
+                st.warning(f"确定要重新分析「{label}」吗？将消耗额外 Token")
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button("✅ 确认重新分析", key=f"confirm_yes_{key}",
+                                 use_container_width=True):
+                        st.session_state.pop(confirm_key, None)
+                        if is_moe:
+                            st.session_state.get("moe_results", {}).clear()
                         else:
-                            st.error(msg)
+                            analyses.pop(key, None)
+                        return True
+                with c2:
+                    if st.button("❌ 取消", key=f"confirm_no_{key}",
+                                 use_container_width=True):
+                        st.session_state.pop(confirm_key, None)
+                        st.rerun()
+                return False
+            else:
+                if st.button(f"✅ {label}完成", use_container_width=True,
+                             key=f"btn_{key}"):
+                    st.session_state[confirm_key] = True
+                    st.rerun()
+                return False
 
-        # ── 分析完成时自动归档 ──────────────────────────────────────
+        # 未完成：正常按钮
+        if needs_prereq and prereq_keys:
+            missing = []
+            label_map = {"expectation": "预期差", "trend": "趋势", "fundamentals": "基本面"}
+            for pk in prereq_keys:
+                if not analyses.get(pk):
+                    missing.append(label_map.get(pk, pk))
+            if missing:
+                if st.button(f"{icon} {label}", use_container_width=True,
+                             key=f"btn_{key}"):
+                    st.warning(f"需要先完成：{'、'.join(missing)}")
+                return False
+
+        if st.button(f"{icon} {label}", use_container_width=True, key=f"btn_{key}",
+                     type="primary" if not done else "secondary"):
+            return True
+        return False
+
+    # ══════════════════════════════════════════════════════════════════════
+    # Tab 1: 📊 智能分析
+    # ══════════════════════════════════════════════════════════════════════
+    with tab_analysis:
+        if not stock_ready:
+            st.info("请先在上方输入股票代码/名称，点击「🔍 查询股票」")
+        else:
+            _show_stock_overview()
+            st.markdown("---")
+
+            # ── 共享缓存检查 ─────────────────────────────────────
+            from utils.shared_cache import find_shared, load_shared
+            if not analyses:  # 尚未分析时才提示
+                shared_list = find_shared(
+                    st.session_state["stock_code"],
+                    exclude_user=current_user,
+                )
+                if shared_list:
+                    for sh in shared_list:
+                        ts_short = sh["timestamp"][11:16]  # HH:MM
+                        keys_str = "、".join({
+                            "expectation": "预期差", "trend": "趋势",
+                            "fundamentals": "基本面", "sentiment": "舆情",
+                            "sector": "板块", "holders": "股东",
+                        }.get(k, k) for k in sh["analyses_keys"])
+                        moe_tag = " + MoE辩论" if sh["has_moe"] else ""
+                        st.info(
+                            f"📦 **{sh['username']}** 于 {ts_short} 已用 "
+                            f"{sh['model_name']} 分析过此股票（{keys_str}{moe_tag}）"
+                        )
+                        if st.button(
+                            f"📥 加载 {sh['username']} 的分析结果（免费）",
+                            key=f"load_shared_{sh['username']}_{sh['model_name']}",
+                        ):
+                            shared_data = load_shared(sh["file_path"])
+                            if shared_data:
+                                st.session_state["analyses"] = shared_data.get("analyses", {})
+                                if shared_data.get("moe_results"):
+                                    st.session_state["moe_results"] = shared_data["moe_results"]
+                                st.session_state["_shared_from"] = (
+                                    f"{sh['username']} · {sh['model_name']} · {ts_short}"
+                                )
+                                st.rerun()
+                    st.markdown("---")
+
+            # 共享来源标注
+            shared_from = st.session_state.get("_shared_from")
+            if shared_from and analyses:
+                st.caption(f"📦 当前结果来自共享缓存：{shared_from}（可重新分析覆盖）")
+
+            if ai_err:
+                st.markdown(f"""<div class="status-banner warn">
+  ⚠️ <strong>AI 模型暂不可用</strong>：{ai_err}，请在左侧切换其他模型。
+</div>""", unsafe_allow_html=True)
+
+            # ── 一键分析（核心三项并行）──────────────────────────────
+            st.markdown("#### 🚀 一键分析")
+            core_keys = ["expectation", "trend", "fundamentals"]
+            core_all_done = all(
+                (analyses.get(k) or is_running(st.session_state, k)) for k in core_keys
+            )
+
+            if not core_all_done:
+                if st.button("🚀 一键全面分析（预期差 + 趋势 + 基本面）",
+                             type="primary", use_container_width=True, key="btn_all"):
+                    if client:
+                        for key in core_keys:
+                            if not analyses.get(key) and not is_running(st.session_state, key):
+                                start_analysis(st.session_state, key, client, cfg_now,
+                                               selected_model)
+                        st.rerun()
+            else:
+                st.success("核心三项分析已完成 ✅")
+
+            # ── 价值投机雷达（核心三项完成后显示）──────────────────
+            if all(analyses.get(k) for k in core_keys):
+                from analysis.signal import compute_signal
+                from ui.charts import render_radar
+                signal = compute_signal(st.session_state)
+                if signal:
+                    name = st.session_state.get("stock_name", "")
+                    st.markdown(f"#### 🎯 {name} · 价值投机雷达")
+                    if signal["resonance"]:
+                        st.markdown("""<div class="status-banner success">
+  🔥 <strong>四维共振信号</strong> — 基本面、题材、技术、资金四维均达标（≥70），高置信度关注！
+</div>""", unsafe_allow_html=True)
+                    col_radar, col_scores = st.columns([3, 2])
+                    with col_radar:
+                        render_radar(signal)
+                    with col_scores:
+                        for dim_name, dim_score, dim_icon in [
+                            ("基本面强度", signal["fundamental"], "📋"),
+                            ("题材正宗度", signal["catalyst"], "🔍"),
+                            ("技术启动度", signal["technical"], "📈"),
+                            ("资金关注度", signal["capital"], "💰"),
+                        ]:
+                            color = "#16a34a" if dim_score >= 70 else "#f59e0b" if dim_score >= 50 else "#ef4444"
+                            st.markdown(
+                                f'<div style="margin-bottom:0.7rem;">'
+                                f'<div style="font-size:0.8rem;color:#6b7280;margin-bottom:2px;">'
+                                f'{dim_icon} {dim_name}</div>'
+                                f'<div style="display:flex;align-items:center;gap:8px;">'
+                                f'<div style="flex:1;background:#f1f5f9;border-radius:6px;height:8px;overflow:hidden;">'
+                                f'<div style="width:{dim_score}%;height:100%;background:{color};'
+                                f'border-radius:6px;"></div></div>'
+                                f'<span style="font-size:0.9rem;font-weight:700;color:{color};'
+                                f'min-width:36px;text-align:right;">{dim_score}</span>'
+                                f'</div></div>',
+                                unsafe_allow_html=True,
+                            )
+                        verdict_color = "#16a34a" if signal["resonance"] else \
+                                       "#f59e0b" if signal["avg"] >= 60 else "#ef4444"
+                        st.markdown(
+                            f'<div style="margin-top:0.8rem;padding:0.7rem;'
+                            f'background:linear-gradient(135deg,#faf5ff,#fdf2f8);'
+                            f'border-radius:10px;border:1px solid #d8b4fe;text-align:center;">'
+                            f'<div style="font-size:0.75rem;color:#9ca3af;">综合评分</div>'
+                            f'<div style="font-size:1.6rem;font-weight:800;color:{verdict_color};">'
+                            f'{signal["avg"]}</div>'
+                            f'<div style="font-size:0.82rem;font-weight:600;color:{verdict_color};">'
+                            f'{signal["verdict"]}</div></div>',
+                            unsafe_allow_html=True,
+                        )
+
+            st.markdown("---")
+
+            # ── 单项分析按钮（含结果展示）──────────────────────────
+            st.markdown("#### 📋 分析模块")
+
+            # 核心三项
+            items = [
+                ("expectation", "预期差分析", "🔍"),
+                ("trend", "K线趋势研判", "📈"),
+                ("fundamentals", "基本面分析", "📋"),
+            ]
+            c1, c2, c3 = st.columns(3)
+            need_rerun = False
+            for col, (key, label, icon) in zip([c1, c2, c3], items):
+                with col:
+                    if _analysis_button(key, label, icon):
+                        if client and not is_running(st.session_state, key):
+                            start_analysis(st.session_state, key, client, cfg_now,
+                                           selected_model)
+                            need_rerun = True
+
+            # 深度分析 + MoE + K线匹配
+            deep_items = [
+                ("sentiment", "舆情分析", "📣"),
+                ("sector", "板块联动", "🏭"),
+                ("holders", "股东动向", "👥"),
+            ]
+            d1, d2, d3 = st.columns(3)
+            for col, (key, label, icon) in zip([d1, d2, d3], deep_items):
+                with col:
+                    if _analysis_button(key, label, icon):
+                        if client and not is_running(st.session_state, key):
+                            start_analysis(st.session_state, key, client, cfg_now,
+                                           selected_model)
+                            need_rerun = True
+
+            m1, m2 = st.columns(2)
+            with m1:
+                if _analysis_button("moe", "MoE辩论", "🎯", needs_prereq=True,
+                                    prereq_keys=["expectation", "trend", "fundamentals"]):
+                    if client and not is_running(st.session_state, "moe"):
+                        start_analysis(st.session_state, "moe", client, cfg_now,
+                                       selected_model)
+                        need_rerun = True
+            with m2:
+                btn_sim = st.button("📐 K线匹配", use_container_width=True, key="btn_sim")
+
+            if need_rerun:
+                st.rerun()
+
+            st.markdown("---")
+
+            # ── 展示各模块分析结果 ────────────────────────────────
+            all_items = items + deep_items
+            for key, title, icon in all_items:
+                if is_running(st.session_state, key):
+                    _show_job_progress(key, title)
+                elif analyses.get(key):
+                    name = st.session_state.get("stock_name", "")
+                    with st.expander(f"{icon} {name} · {title}结果", expanded=True):
+                        st.markdown(analyses[key])
+
+            # MoE 结果
+            if is_running(st.session_state, "moe"):
+                _show_job_progress("moe", "MoE 多方辩论")
+            elif moe_done:
+                _render_moe_results()
+
+            # K线匹配（点击按钮展开，或有缓存结果时自动展示）
+            if btn_sim:
+                st.session_state["_show_sim"] = True
+            if st.session_state.get("_show_sim") or st.session_state.get("similarity_results"):
+                _show_similarity_section(
+                    st.session_state.get("stock_name", ""),
+                    st.session_state.get("stock_code", ""),
+                )
+
+            # ── 邮件推送 ──────────────────────────────────────────
+            if email_addr and analyses and not any_running(st.session_state):
+                has_any = any(analyses.get(k) for k in
+                             ["expectation", "trend", "fundamentals",
+                              "sentiment", "sector", "holders"])
+                if has_any:
+                    st.markdown("---")
+                    if st.button("📧 发送分析报告到邮箱", key="send_email"):
+                        with st.spinner("正在发送..."):
+                            from utils.email_sender import send_analysis_email
+                            ok, msg = send_analysis_email(
+                                email_addr,
+                                st.session_state.get("stock_name", ""),
+                                to_code6(st.session_state.get("stock_code", "")),
+                                st.session_state.get("stock_info", {}),
+                                analyses,
+                                st.session_state.get("moe_results", {}),
+                                selected_model,
+                            )
+                            if ok:
+                                st.success(f"✅ 已发送至 {email_addr}")
+                            else:
+                                st.error(msg)
+
+    # ══════════════════════════════════════════════════════════════════════
+    # Tab 2: ⚖️ 股票对比
+    # ══════════════════════════════════════════════════════════════════════
+    with tab_compare:
+        _show_compare_tab(client, cfg_now, selected_model)
+
+    # ══════════════════════════════════════════════════════════════════════
+    # Tab 3: 💬 互动问答
+    # ══════════════════════════════════════════════════════════════════════
+    with tab_qa:
+        if not stock_ready:
+            st.info("请先在上方查询股票，然后即可自由提问")
+        elif not client:
+            st.warning("AI 模型不可用，请检查 API Key")
+        else:
+            _render_free_question(client, cfg_now, selected_model,
+                                  st.session_state.get("stock_name", ""),
+                                  st.session_state.get("stock_code", ""),
+                                  st.session_state.get("stock_info", {}),
+                                  analyses)
+
+    # ══════════════════════════════════════════════════════════════════════
+    # Tab 3: 🔮 趣味玄学
+    # ══════════════════════════════════════════════════════════════════════
+    with tab_mystic:
+        client_m, cfg_m, _ = get_ai_client(selected_model)
+        _show_mystic(client_m, cfg_m, selected_model)
+
+    # ══════════════════════════════════════════════════════════════════════
+    # 归档 + 自动刷新
+    # ══════════════════════════════════════════════════════════════════════
+    if stock_ready:
         _was_running = st.session_state.get("_was_running", False)
         _is_running_now = any_running(st.session_state)
         st.session_state["_was_running"] = _is_running_now
 
         if _was_running and not _is_running_now:
-            # 刚从"有任务运行"变为"全部完成"，触发归档
             try:
                 from utils.archive import save_archive
                 save_archive(st.session_state)
             except Exception:
                 pass
+            # 保存到共享缓存
+            try:
+                from utils.shared_cache import save_shared
+                save_shared(
+                    stock_code=st.session_state.get("stock_code", ""),
+                    stock_name=st.session_state.get("stock_name", ""),
+                    model_name=st.session_state.get("selected_model", ""),
+                    username=st.session_state.get("current_user", ""),
+                    analyses=st.session_state.get("analyses", {}),
+                    moe_results=st.session_state.get("moe_results"),
+                    stock_info=st.session_state.get("stock_info"),
+                )
+            except Exception:
+                pass
 
-        # ── 如果有后台任务在运行，定时刷新 ─────────────────────────
         if _is_running_now:
             time.sleep(1.5)
             st.rerun()
 
-    # 未查询股票但点了玄学按钮
-    elif btn_mystic or st.session_state.get("active_tab") == "mystic":
-        client, cfg_now, ai_err = get_ai_client(selected_model)
-        _show_mystic(client, cfg_now, selected_model)
+
+def _show_compare_tab(client, cfg, model_name):
+    """⚖️ 股票对比 — 两只股票同屏对比"""
+    import pandas as pd
+    from analysis.signal import compute_signal
+
+    st.markdown("#### ⚖️ 双股对比分析")
+    st.caption("输入两只股票，同屏对比关键指标和 AI 评价，帮你做选择")
+
+    col_a, col_b = st.columns(2)
+    with col_a:
+        query_a = st.text_input("股票 A", placeholder="代码或名称，如 600519",
+                                key="cmp_query_a")
+    with col_b:
+        query_b = st.text_input("股票 B", placeholder="代码或名称，如 000858",
+                                key="cmp_query_b")
+
+    if st.button("⚖️ 开始对比", type="primary", use_container_width=True, key="btn_compare"):
+        if not query_a or not query_b:
+            st.warning("请输入两只股票")
+            return
+        with st.spinner("正在获取两只股票数据..."):
+            code_a, name_a, err_a = resolve_stock(query_a.strip())
+            code_b, name_b, err_b = resolve_stock(query_b.strip())
+        if err_a:
+            st.warning(f"股票A：{err_a}")
+        if err_b:
+            st.warning(f"股票B：{err_b}")
+
+        # 获取基本信息
+        with st.status("📥 获取对比数据...", expanded=True) as s:
+            st.write(f"▶ {name_a} 基本信息...")
+            info_a, _ = get_basic_info(code_a)
+            st.write(f"▶ {name_b} 基本信息...")
+            info_b, _ = get_basic_info(code_b)
+            st.write(f"▶ {name_a} K线数据...")
+            df_a, _ = get_price_df(code_a, days=60)
+            st.write(f"▶ {name_b} K线数据...")
+            df_b, _ = get_price_df(code_b, days=60)
+            s.update(label="✅ 数据获取完成！", state="complete")
+
+        st.session_state["_cmp_data"] = {
+            "name_a": name_a, "code_a": code_a, "info_a": info_a, "df_a": df_a,
+            "name_b": name_b, "code_b": code_b, "info_b": info_b, "df_b": df_b,
+        }
+
+    # 展示对比结果
+    cmp = st.session_state.get("_cmp_data")
+    if not cmp:
+        return
+
+    name_a, name_b = cmp["name_a"], cmp["name_b"]
+    info_a, info_b = cmp["info_a"], cmp["info_b"]
+
+    st.markdown("---")
+    st.markdown(f"### {name_a} vs {name_b}")
+
+    # ── 关键指标对比表 ─────────────────────────────────────
+    metrics = [
+        ("最新价(元)", "最新价"),
+        ("市盈率TTM", "PE(TTM)"),
+        ("市净率PB", "PB"),
+        ("市销率PS", "PS"),
+        ("换手率(%)", "换手率%"),
+        ("行业", "行业"),
+    ]
+    rows = []
+    for info_key, display_name in metrics:
+        va = info_a.get(info_key, "—")
+        vb = info_b.get(info_key, "—")
+        # 数值比较：标注优劣
+        better = ""
+        try:
+            fa, fb = float(va), float(vb)
+            if info_key in ("市盈率TTM", "市净率PB", "市销率PS"):
+                # 越低越好（排除负值）
+                if 0 < fa < fb:
+                    better = "← 优"
+                elif 0 < fb < fa:
+                    better = "优 →"
+            elif info_key == "换手率(%)":
+                pass  # 换手率无绝对优劣
+        except (ValueError, TypeError):
+            pass
+        rows.append({
+            "指标": display_name,
+            name_a: str(va)[:12],
+            name_b: str(vb)[:12],
+            "": better,
+        })
+
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+    # ── K线走势对比 ────────────────────────────────────────
+    df_a, df_b = cmp.get("df_a", pd.DataFrame()), cmp.get("df_b", pd.DataFrame())
+    if not df_a.empty and not df_b.empty:
+        import plotly.graph_objects as go
+        fig = go.Figure()
+        # 归一化收盘价（起点=100）
+        if len(df_a) > 0:
+            base_a = df_a["close"].iloc[0]
+            fig.add_trace(go.Scatter(
+                x=df_a["trade_date"], y=df_a["close"] / base_a * 100,
+                name=name_a, line=dict(color="#6366f1", width=2),
+            ))
+        if len(df_b) > 0:
+            base_b = df_b["close"].iloc[0]
+            fig.add_trace(go.Scatter(
+                x=df_b["trade_date"], y=df_b["close"] / base_b * 100,
+                name=name_b, line=dict(color="#f59e0b", width=2),
+            ))
+        fig.update_layout(
+            title="近60日走势对比（归一化）",
+            yaxis_title="相对涨幅（起点=100）",
+            height=350, margin=dict(l=0, r=0, t=40, b=0),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02),
+        )
+        fig.update_xaxes(type="category", tickangle=-45, nticks=10)
+        st.plotly_chart(fig, use_container_width=True)
+
+    # ── AI 对比点评 ────────────────────────────────────────
+    if not client:
+        st.caption("AI 模型不可用，无法生成对比点评")
+        return
+
+    # 检查缓存
+    cmp_key = f"_cmp_ai_{cmp['code_a']}_{cmp['code_b']}"
+    cached_comment = st.session_state.get(cmp_key)
+    if cached_comment:
+        st.markdown("#### 🤖 AI 对比点评")
+        st.markdown(cached_comment)
+        if st.button("🔄 重新生成点评", key="redo_cmp_ai"):
+            st.session_state.pop(cmp_key, None)
+            st.rerun()
+        return
+
+    if st.button("🤖 生成 AI 对比点评", type="primary", key="btn_cmp_ai"):
+        from ai.client import call_ai
+        prompt = f"""请对比分析以下两只A股，帮助投资者做选择：
+
+## 股票A：{name_a}（{to_code6(cmp['code_a'])}）
+{_format_info_for_ai(info_a)}
+
+## 股票B：{name_b}（{to_code6(cmp['code_b'])}）
+{_format_info_for_ai(info_b)}
+
+请从以下维度逐项对比，最后给出明确的选择建议：
+1. **估值对比**：PE/PB/PS 谁更便宜，是否合理
+2. **成长性**：行业前景、增长潜力
+3. **技术面**：近期走势强弱
+4. **资金面**：换手率、市场关注度
+5. **风险对比**：各自主要风险点
+
+## 最终建议
+明确推荐哪只（或各自适合什么策略），给出理由。
+"""
+        system = "你是专业A股投资顾问，擅长对比分析。请联网搜索两只股票的最新消息辅助判断。回答要具体有数据，不要空泛。"
+        with st.spinner("AI 正在对比分析..."):
+            result, err = call_ai(client, cfg, prompt, system=system, max_tokens=4000,
+                                  username=st.session_state.get("current_user", ""))
+        if err:
+            st.error(f"对比分析失败：{err}")
+        else:
+            st.session_state[cmp_key] = result
+            st.rerun()
+
+
+def _format_info_for_ai(info: dict) -> str:
+    """格式化股票信息供 AI 对比使用"""
+    parts = []
+    for key in ["最新价(元)", "市盈率TTM", "市净率PB", "市销率PS",
+                "换手率(%)", "行业", "总市值(亿)"]:
+        v = info.get(key, "")
+        if v and str(v) != "N/A":
+            parts.append(f"- {key}: {v}")
+    return "\n".join(parts) if parts else "- 数据暂无"
 
 
 def _show_stock_overview():

@@ -120,11 +120,7 @@ def _show_moe_tab(client, cfg, model_name):
             else:
                 st.warning(f"MoE 辩论需要先完成：{'、'.join(missing)}")
         else:
-            # 前三项都完成了，自动启动 MoE
-            if client and not is_running(st.session_state, "moe"):
-                start_analysis(st.session_state, "moe", client, cfg, model_name)
-                time.sleep(0.5)
-                st.rerun()
+            st.info("前置分析已完成，点击上方「🎯 MoE辩论」按钮启动")
 
 
 def _show_all_tab(client, cfg, model_name):
@@ -220,12 +216,7 @@ def _show_all_tab(client, cfg, model_name):
                     with st.container(border=True):
                         st.markdown(content)
 
-    # 三项都完成且 MoE 未启动 → 自动启动 MoE
-    all_three_done = all(analyses.get(k) for k in ["expectation", "trend", "fundamentals"])
-    if all_three_done and not moe_done and not is_running(st.session_state, "moe") and client:
-        start_analysis(st.session_state, "moe", client, cfg, model_name)
-        time.sleep(0.5)
-        st.rerun()
+    # MoE 不再自动启动，需用户手动点击
 
 
 def _show_running_summary():
