@@ -128,15 +128,15 @@ def render_compare_tab(client, cfg, selected_model):
         import plotly.graph_objects as go
         fig = go.Figure()
         if len(df_a) > 0:
-            base_a = df_a["close"].iloc[0]
+            base_a = df_a["收盘"].iloc[0]
             fig.add_trace(go.Scatter(
-                x=df_a["trade_date"], y=df_a["close"] / base_a * 100,
+                x=df_a["日期"], y=df_a["收盘"] / base_a * 100,
                 name=name_a, line=dict(color="#6366f1", width=2),
             ))
         if len(df_b) > 0:
-            base_b = df_b["close"].iloc[0]
+            base_b = df_b["收盘"].iloc[0]
             fig.add_trace(go.Scatter(
-                x=df_b["trade_date"], y=df_b["close"] / base_b * 100,
+                x=df_b["日期"], y=df_b["收盘"] / base_b * 100,
                 name=name_b, line=dict(color="#f59e0b", width=2),
             ))
         fig.update_layout(
