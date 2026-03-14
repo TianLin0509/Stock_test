@@ -1,0 +1,32 @@
+# Git
+.git/
+.gitignore
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE
+.vscode/
+.idea/
+
+# Secrets（通过 volume 挂载，不 bake 进镜像）
+.streamlit/secrets.toml
+secrets.toml
+.env
+
+# 大文件（通过 volume 挂载）
+data/history/
+
+# 用户数据
+user_data/
+
+# 分析归档
+data/archive/
+
+# Docker 自身
+Dockerfile
+docker-compose.yml
+.dockerignore
+deploy.sh

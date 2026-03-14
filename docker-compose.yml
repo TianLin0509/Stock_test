@@ -1,0 +1,26 @@
+# A股智能投研助手 — Docker Compose
+# 用法：docker compose up -d
+
+services:
+  stock-app:
+    build: .
+    container_name: stock-research
+    restart: unless-stopped
+    ports:
+      - "8501:8501"
+    volumes:
+      # Secrets — 宿主机上的 secrets.toml 挂载进容器
+      - ./.streamlit/secrets.toml:/app/.streamlit/secrets.toml:ro
+      # K线匹配历史数据（127MB，不打包进镜像）
+      - ./data/history:/app/data/history:ro
+      # 用户数据持久化
+      - ./user_data:/app/user_data
+      # 分析归档持久化
+      - ./data/archive:/app/data/archive
+    environment:
+      - TZ=Asia/Shanghai
+    # 内存限制（按需调整）
+    deploy:
+      resources:
+        limits:
+          memory: 2G
