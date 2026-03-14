@@ -436,6 +436,10 @@ def main():
             if k.startswith("_confirm_redo_"):
                 del st.session_state[k]
         st.session_state["analyses"] = {}
+        # 清除图表缓存（股票切换了）
+        for k in list(st.session_state.keys()):
+            if k.startswith("_fig_kline_") or k.startswith("_fig_val_"):
+                del st.session_state[k]
 
         with st.spinner("🔍 解析股票中..."):
             ts_code, name, resolve_warn = resolve_stock(q)
@@ -482,6 +486,26 @@ def main():
   ⚠️ <strong>部分数据获取受限</strong>：{' | '.join(data_errors[:3])}
 </div>""", unsafe_allow_html=True)
 
+        # ── 智能归档恢复：先加载缓存，已有的 key 不再花 token ──
+        from utils.archive import find_recent, load_archive
+        _recent = find_recent(ts_code)
+        if _recent:
+            _recent_data = load_archive(_recent["file"])
+            if _recent_data and _recent_data.get("analyses"):
+                restored = _recent_data["analyses"]
+                st.session_state["analyses"] = restored
+                if _recent_data.get("moe_results"):
+                    st.session_state["moe_results"] = {
+                        **_recent_data["moe_results"], "done": True,
+                    }
+                _ts_short = _recent.get("ts", "")[11:16]
+                _from_user = _recent.get("username", "")
+                st.session_state["_shared_from"] = (
+                    f"{_from_user} · {_recent.get('model', '')} · {_ts_short}"
+                )
+                logger.debug("[resolve] 从归档恢复 %d 项分析: %s",
+                             len(restored), list(restored.keys()))
+
     # Top10 自动跳转触发
     if _auto_search and _top10_pick:
         _resolve_and_fetch(_top10_pick)
@@ -519,6 +543,7 @@ def main():
                 _resolve_and_fetch(query)
                 st.session_state["_last_query"] = query
                 stock_ready = True
+                analyses = st.session_state.get("analyses", {})  # 刷新（可能已从归档恢复）
             if client:
                 for key in CORE_KEYS:
                     if not analyses.get(key) and not is_running(st.session_state, key):
