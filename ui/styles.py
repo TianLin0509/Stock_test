@@ -72,30 +72,37 @@ def inject_css():
 [data-testid="stHorizontalBlock"]:has(.stTextInput)::before {
   display: none !important;
 }
-[data-testid="stHorizontalBlock"]:has(.stTextInput) .stButton button {
-  border-radius: 50px !important;
-  font-size: 0.82rem !important;
-  padding: 0.45rem 1rem !important;
-  min-height: unset !important;
-  white-space: nowrap !important;
-}
-/* 搜索行按钮统一风格：白底描边 + 悬浮凸显 */
+/* 搜索行按钮：统一与输入框同风格边框 */
 [data-testid="stHorizontalBlock"]:has(.stTextInput) .stButton button,
 [data-testid="stHorizontalBlock"]:has(.stTextInput) .stButton button[kind="primary"] {
+  border-radius: 50px !important;
+  font-size: 0.82rem !important;
+  padding: 0.45rem 1.2rem !important;
+  min-height: unset !important;
+  white-space: nowrap !important;
   background: var(--bg-card) !important;
-  border: 1.5px solid #e2e8f0 !important;
-  color: #475569 !important;
+  border: 2px solid var(--border) !important;
+  color: var(--text-mid) !important;
   font-weight: 600 !important;
   box-shadow: none !important;
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
 }
+/* 桌面端悬浮：上浮 + 蓝色高亮 */
 [data-testid="stHorizontalBlock"]:has(.stTextInput) .stButton button:hover,
 [data-testid="stHorizontalBlock"]:has(.stTextInput) .stButton button[kind="primary"]:hover {
   transform: translateY(-2px) !important;
-  box-shadow: 0 6px 20px rgba(59, 130, 246, 0.18) !important;
-  border-color: #3b82f6 !important;
-  color: #2563eb !important;
-  background: #f8fafc !important;
+  box-shadow: 0 6px 16px rgba(99, 102, 241, 0.18) !important;
+  border-color: var(--blue) !important;
+  color: var(--blue) !important;
+  background: var(--bg-card) !important;
+}
+/* 触摸按下反馈（手机端） */
+[data-testid="stHorizontalBlock"]:has(.stTextInput) .stButton button:active,
+[data-testid="stHorizontalBlock"]:has(.stTextInput) .stButton button[kind="primary"]:active {
+  transform: scale(0.96) !important;
+  border-color: var(--blue) !important;
+  color: var(--blue) !important;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12) !important;
 }
 
 html, body, [data-testid="stAppViewContainer"] {
@@ -423,6 +430,14 @@ hr { border-color: var(--border) !important; margin: 1rem 0 !important; }
     padding: 0.55rem 0.8rem !important;
     border-radius: 12px !important;
     min-height: 44px !important;   /* iOS 推荐最小触控尺寸 */
+  }
+  /* 搜索行按钮：手机端圆角与输入框统一 */
+  [data-testid="stHorizontalBlock"]:has(.stTextInput) .stButton button,
+  [data-testid="stHorizontalBlock"]:has(.stTextInput) .stButton button[kind="primary"] {
+    border-radius: 12px !important;
+    min-height: 44px !important;
+    font-size: 0.85rem !important;
+    padding: 0.5rem 0.8rem !important;
   }
 
   /* ── 指标卡片 ── */
