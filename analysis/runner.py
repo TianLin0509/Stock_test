@@ -181,53 +181,45 @@ def collect_result(session_state, key: str):
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _run_generic(job, client, cfg, model_name, label, build_fn, build_args, username=""):
-    """通用分析流程：构建 prompt → 调用 AI → 处理结果"""
-    import time as _time
+    """通用分析流程：构建 prompt → 流式调用 AI → 逐块累积结果
+    job["partial_result"] 实时更新，前端每次 rerun 可展示已生成的内容。
+    """
+    from ai.client import call_ai_stream, add_tokens
 
     try:
         _log(job, f"📡 正在连接 {model_name}...")
         p, s = build_fn(*build_args)
         _log(job, f"🤖 AI 正在进行{label}...")
 
-        # 在子线程中调用 AI，主线程做心跳计时
-        _ai_result = [None, None]  # [text, err]
-        _ai_done = threading.Event()
+        # 流式调用，逐块累积到 partial_result
+        job["partial_result"] = ""
+        full_text = ""
+        has_error = False
 
-        def _call():
-            text, err = call_ai(client, cfg, p, system=s, max_tokens=8000, username=username)
-            _ai_result[0] = text
-            _ai_result[1] = err
-            _ai_done.set()
+        for chunk in call_ai_stream(client, cfg, p, system=s, max_tokens=8000):
+            full_text += chunk
+            job["partial_result"] = full_text
+            # 检查是否为错误消息
+            if chunk.startswith("\n\n⚠️"):
+                has_error = True
 
-        t = threading.Thread(target=_call, daemon=True)
-        t.start()
-
-        # 心跳：每 5 秒更新进度，让前端感知到活跃
-        _tips = [
-            "正在联网搜索最新资讯...",
-            "正在分析公司基本面数据...",
-            "正在梳理行业竞争格局...",
-            "正在评估技术面信号...",
-            "正在综合多维度信息...",
-            "正在生成分析结论...",
-            "即将完成，请稍候...",
-        ]
-        elapsed = 0
-        tip_idx = 0
-        while not _ai_done.wait(timeout=5):
-            elapsed += 5
-            tip = _tips[min(tip_idx, len(_tips) - 1)]
-            _log(job, f"⏱️ 已等待 {elapsed}s — {tip}")
-            tip_idx += 1
-
-        result, err = _ai_result
-        if err:
-            _log(job, f"❌ {label}失败：{err}")
-            job["result"] = f"⚠️ {label}失败：{err}"
-            job["error"] = err
-        else:
+        # 流式完成后估算 token 用量
+        if not has_error:
+            est_prompt = len(p)
+            est_completion = len(full_text)
+            add_tokens(
+                prompt_tokens=est_prompt,
+                completion_tokens=est_completion,
+                total_tokens=est_prompt + est_completion,
+                username=username,
+            )
             _log(job, f"✅ {label}完成！")
-            job["result"] = result
+            job["result"] = full_text
+        else:
+            _log(job, f"❌ {label}失败")
+            job["result"] = full_text
+            job["error"] = full_text
+
         job["status"] = "done"
     except Exception as e:
         logger.debug("[_run_generic/%s] 异常: %s", label, e)

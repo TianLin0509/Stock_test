@@ -14,17 +14,26 @@ from ai.context import build_analysis_context
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _show_job_progress(key: str, title: str):
-    """显示后台任务的实时进度"""
+    """显示后台任务的实时进度（含流式部分内容）"""
     jobs = get_jobs(st.session_state)
     job = jobs.get(key, {})
     status = job.get("status", "")
     progress = job.get("progress", [])
+    partial = job.get("partial_result", "")
 
     if status == "running":
-        label = f"⏳ {title}..."
-        with st.status(label, expanded=True, state="running"):
-            for msg in progress:
-                st.write(msg)
+        if partial:
+            # 有流式内容 → 直接展示已生成的部分 + 光标动画
+            name = st.session_state.get("stock_name", "")
+            st.markdown(f"#### ⏳ {name} · {title}中…")
+            with st.container(border=True):
+                st.markdown(partial + " ▌")
+        else:
+            # 尚无内容 → 显示进度消息
+            label = f"⏳ {title}..."
+            with st.status(label, expanded=True, state="running"):
+                for msg in progress:
+                    st.write(msg)
     elif status == "done" and job.get("error"):
         with st.status(f"❌ {title}失败", expanded=True, state="error"):
             for msg in progress:
