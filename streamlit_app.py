@@ -119,6 +119,23 @@ def main():
 """)
 
         st.markdown("---")
+        st.markdown("### 📧 邮件推送")
+        try:
+            from utils.email_sender import smtp_configured
+            if smtp_configured():
+                email_addr = st.text_input("收件邮箱", value="", placeholder="your@email.com",
+                                           key="email_input")
+                st.caption("分析完成后可一键推送报告到邮箱")
+            else:
+                st.caption("⚠️ SMTP 未配置")
+                st.caption("请在 Secrets 中添加：")
+                st.code("SMTP_HOST\nSMTP_PORT\nSMTP_USER\nSMTP_PASS", language=None)
+                email_addr = ""
+        except Exception:
+            st.caption("📧 邮件模块未加载")
+            email_addr = ""
+
+        st.markdown("---")
         st.markdown("""
 <div class="disclaimer">
 ⚠️ <strong>免责声明</strong><br>
@@ -381,6 +398,30 @@ def main():
             _show_stock_overview()
         else:
             show_completed_results(client, cfg_now, selected_model)
+
+        # ── 邮件推送按钮（有分析结果时显示）──────────────────────────
+        if email_addr and analyses and not any_running(st.session_state):
+            has_any = any(analyses.get(k) for k in
+                         ["expectation", "trend", "fundamentals",
+                          "sentiment", "sector", "holders"])
+            if has_any:
+                st.markdown("---")
+                if st.button("📧 发送分析报告到邮箱", key="send_email"):
+                    with st.spinner("正在发送..."):
+                        from utils.email_sender import send_analysis_email
+                        ok, msg = send_analysis_email(
+                            email_addr,
+                            st.session_state.get("stock_name", ""),
+                            to_code6(st.session_state.get("stock_code", "")),
+                            st.session_state.get("stock_info", {}),
+                            analyses,
+                            st.session_state.get("moe_results", {}),
+                            selected_model,
+                        )
+                        if ok:
+                            st.success(f"✅ 已发送至 {email_addr}")
+                        else:
+                            st.error(msg)
 
         # ── 如果有后台任务在运行，定时刷新 ─────────────────────────
         if any_running(st.session_state):
