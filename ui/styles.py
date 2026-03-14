@@ -79,32 +79,23 @@ def inject_css():
   min-height: unset !important;
   white-space: nowrap !important;
 }
-/* 一键分析按钮：清新蓝绿渐变 */
+/* 搜索行按钮统一风格：白底描边 + 悬浮凸显 */
+[data-testid="stHorizontalBlock"]:has(.stTextInput) .stButton button,
 [data-testid="stHorizontalBlock"]:has(.stTextInput) .stButton button[kind="primary"] {
-  background: linear-gradient(135deg, #3b82f6 0%, #06b6d4 100%) !important;
-  border: none !important;
-  color: #fff !important;
-  font-weight: 700 !important;
-  box-shadow: 0 3px 12px rgba(59, 130, 246, 0.3) !important;
-  transition: all 0.2s ease !important;
-}
-[data-testid="stHorizontalBlock"]:has(.stTextInput) .stButton button[kind="primary"]:hover {
-  transform: translateY(-1px) !important;
-  box-shadow: 0 5px 18px rgba(59, 130, 246, 0.4) !important;
-}
-/* 重置按钮：轻量描边风格 */
-[data-testid="stHorizontalBlock"]:has(.stTextInput) .stButton button:not([kind="primary"]) {
   background: var(--bg-card) !important;
   border: 1.5px solid #e2e8f0 !important;
-  color: #64748b !important;
-  box-shadow: none !important;
+  color: #475569 !important;
   font-weight: 600 !important;
-  transition: all 0.2s ease !important;
+  box-shadow: none !important;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
 }
-[data-testid="stHorizontalBlock"]:has(.stTextInput) .stButton button:not([kind="primary"]):hover {
+[data-testid="stHorizontalBlock"]:has(.stTextInput) .stButton button:hover,
+[data-testid="stHorizontalBlock"]:has(.stTextInput) .stButton button[kind="primary"]:hover {
+  transform: translateY(-2px) !important;
+  box-shadow: 0 6px 20px rgba(59, 130, 246, 0.18) !important;
+  border-color: #3b82f6 !important;
+  color: #2563eb !important;
   background: #f8fafc !important;
-  color: #334155 !important;
-  border-color: #94a3b8 !important;
 }
 
 html, body, [data-testid="stAppViewContainer"] {
