@@ -123,7 +123,7 @@ def render_analysis_tab(client, cfg_now, selected_model, email_addr):
                     if client and stock_ready:
                         start_analysis(st.session_state, key, client, cfg_now,
                                        selected_model)
-                st.session_state["_skip_poll_sleep"] = True
+                st.session_state["_skip_poll_count"] = 2
                 st.session_state["_fast_rerun"] = True
                 st.rerun()
 
@@ -157,7 +157,7 @@ def render_analysis_tab(client, cfg_now, selected_model, email_addr):
                             start_analysis(st.session_state, dk, client, cfg_now,
                                            selected_model)
                     st.session_state["_auto_sim"] = True
-                st.session_state["_skip_poll_sleep"] = True
+                st.session_state["_skip_poll_count"] = 2
                 st.session_state["_fast_rerun"] = True
                 st.rerun()
 
@@ -218,7 +218,7 @@ def render_analysis_tab(client, cfg_now, selected_model, email_addr):
                         start_analysis(st.session_state, key, client, cfg_now,
                                        selected_model)
                 st.session_state["active_view"] = "overview"
-                st.session_state["_skip_poll_sleep"] = True
+                st.session_state["_skip_poll_count"] = 2
                 st.session_state["_fast_rerun"] = True
                 st.rerun()
 

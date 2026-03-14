@@ -7,6 +7,7 @@ ADMIN_USERNAME = "LT"
 ARCHIVE_CUTOFF_HOUR = 19
 POLL_INTERVAL = 0.3
 POLL_INTERVAL_IDLE = 1.5          # 无流式内容时的轮询间隔
+POLL_INTERVAL_WARMUP = 0.5       # 线程刚启动、尚无流式内容时
 CORE_KEYS = ["expectation", "trend", "fundamentals"]
 DEEP_KEYS = ["sentiment", "sector", "holders"]
 ALL_ANALYSIS_KEYS = CORE_KEYS + DEEP_KEYS

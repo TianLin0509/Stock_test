@@ -50,7 +50,7 @@ st.markdown(
 from config import (
     MODEL_CONFIGS, MODEL_NAMES, ADMIN_USERNAME,
     CORE_KEYS, DEEP_KEYS, ALL_ANALYSIS_KEYS,
-    POLL_INTERVAL, POLL_INTERVAL_IDLE,
+    POLL_INTERVAL, POLL_INTERVAL_IDLE, POLL_INTERVAL_WARMUP,
 )
 from ui.styles import inject_css
 from data.tushare_client import (
@@ -593,7 +593,7 @@ def main():
         if client and _pending_key:
             start_analysis(st.session_state, _pending_key, client, cfg_now, selected_model)
         st.session_state["active_view"] = _pending_key or "overview"
-        st.session_state["_skip_poll_sleep"] = True
+        st.session_state["_skip_poll_count"] = 2
         st.rerun()
 
     # ══════════════════════════════════════════════════════════════════════
@@ -628,7 +628,7 @@ def main():
                         start_analysis(st.session_state, key, client, cfg_now,
                                        selected_model)
             st.session_state["active_view"] = "overview"
-            st.session_state["_skip_poll_sleep"] = True
+            st.session_state["_skip_poll_count"] = 2
             st.session_state["_fast_rerun"] = True
             st.rerun()
 
@@ -686,14 +686,27 @@ def main():
 
         # Phase 1.5: 自适应轮询频率
         if _is_running_now:
-            if st.session_state.pop("_skip_poll_sleep", False):
+            _skip_count = st.session_state.get("_skip_poll_count", 0)
+            if _skip_count > 0:
+                st.session_state["_skip_poll_count"] = _skip_count - 1
                 st.rerun()
             else:
+                jobs_dict = get_jobs(st.session_state)
                 _any_streaming = any(
-                    job.get("partial_result") for job in get_jobs(st.session_state).values()
+                    job.get("partial_result") for job in jobs_dict.values()
                     if job.get("status") == "running"
                 )
-                time.sleep(POLL_INTERVAL if _any_streaming else POLL_INTERVAL_IDLE)
+                if _any_streaming:
+                    time.sleep(POLL_INTERVAL)
+                else:
+                    import time as _t
+                    _now = _t.time()
+                    _any_warming = any(
+                        _now - job.get("_started_at", 0) < 5
+                        for job in jobs_dict.values()
+                        if job.get("status") == "running"
+                    )
+                    time.sleep(POLL_INTERVAL_WARMUP if _any_warming else POLL_INTERVAL_IDLE)
                 st.rerun()
 
 

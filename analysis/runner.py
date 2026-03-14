@@ -223,6 +223,7 @@ def _run_generic(job, client, cfg, model_name, label, build_fn, build_args, user
 
     try:
         _log(job, f"📡 正在连接 {model_name}...")
+        job["partial_result"] = " "   # 立即标记非空，让轮询走快速通道
         p, s = build_fn(*build_args)
         _log(job, f"🤖 AI 正在进行{label}...")
 
