@@ -34,6 +34,9 @@ def inject_css():
   --radius-sm: 10px;
 }
 
+/* 禁用 Streamlit rerun 时旧内容的半透明残影效果 */
+[data-stale="true"] { opacity: 1 !important; }
+
 html, body, [data-testid="stAppViewContainer"] {
   background: var(--bg) !important;
   font-family: 'Noto Sans SC', 'PingFang SC', sans-serif;
