@@ -623,12 +623,12 @@ def main():
                 st.button("⏳ 分析中", type=_btn_type_all, disabled=True,
                           use_container_width=True, key="btn_all")
             elif core_all_started:
-                if st.button("✅ 一键", type=_btn_type_all,
+                if st.button("✅ 已分析", type=_btn_type_all,
                              use_container_width=True, key="btn_all"):
                     st.session_state["active_view"] = "overview"
                     st.rerun()
             else:
-                if st.button("🚀 一键", type=_btn_type_all,
+                if st.button("开始分析", type=_btn_type_all,
                              use_container_width=True, key="btn_all"):
                     if not query:
                         st.toast("请先输入股票代码或名称")
