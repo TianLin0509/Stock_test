@@ -202,7 +202,7 @@ def _render_overview(client, cfg_now, analyses, core_all_done, current_user):
     # 归档缓存检查（无分析结果时自动恢复 / 加载他人结果）
     from utils.archive import find_recent, find_today_others, load_archive
 
-    if not analyses:
+    if not analyses and not any_running(st.session_state):
         _stock_code = st.session_state["stock_code"]
 
         # 用 session_state 缓存归档查询结果（Phase 1.3）
