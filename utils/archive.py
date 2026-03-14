@@ -127,13 +127,13 @@ def save_archive(session_state: dict):
     code6 = stock_code.split(".")[0] if "." in stock_code else stock_code
     username = session_state.get("current_user", "anonymous")
 
-    # 避免重复归档同一股票同一用户（5分钟内）
+    # 同一天 + 同一股票 + 同一用户 → 更新而非新建
     archive_key = f"{code6}_{username}"
     last_ts = session_state.get("_last_archive", {}).get(archive_key, "")
     if last_ts:
         try:
-            elapsed = (now - datetime.fromisoformat(last_ts)).total_seconds()
-            if elapsed < 300:  # 5分钟内已归档过，更新而非新建
+            last_dt = datetime.fromisoformat(last_ts)
+            if last_dt.date() == now.date():
                 return _update_archive(session_state, valid_keys, archive_key)
         except (ValueError, TypeError):
             pass
