@@ -245,6 +245,51 @@ def main():
         else:
             st.caption("暂无分析记录")
 
+        # ── 管理后台（仅 LT 可见）────────────────────────────────────
+        if current_user == "LT":
+            st.markdown("---")
+            st.markdown("### 🔧 管理后台")
+            if st.button("📊 查看所有用户", key="admin_btn"):
+                st.session_state["_show_admin"] = not st.session_state.get("_show_admin", False)
+            if st.session_state.get("_show_admin"):
+                from utils.user_store import get_all_users_summary, load_user as _admin_load
+                all_users = get_all_users_summary()
+                if all_users:
+                    st.markdown(f"**共 {len(all_users)} 位用户**")
+                    for u in all_users:
+                        _t = u["total_tokens"]
+                        _td = f"{_t/10000:.1f}万" if _t >= 10000 else f"{_t:,}"
+                        _last = u.get("last_login", "")[:10]
+                        st.caption(
+                            f"**{u['username']}** · {_td} tokens · "
+                            f"{u['history_count']}次分析 · 最后登录 {_last}"
+                        )
+                    # 展开某用户的详细历史
+                    _unames = [u["username"] for u in all_users]
+                    _sel = st.selectbox("查看用户详情", ["--"] + _unames, key="admin_user_sel")
+                    if _sel != "--":
+                        _ud = _admin_load(_sel)
+                        _uh = _ud.get("history", [])
+                        if _uh:
+                            st.markdown(f"**{_sel} 的分析记录（近20条）：**")
+                            for _e in reversed(_uh[-20:]):
+                                st.caption(
+                                    f"{_e.get('ts', '')[:16]} · {_e.get('stock_name', '')} "
+                                    f"· {_e.get('model', '')} · "
+                                    f"{', '.join(_e.get('analyses_done', []))}"
+                                )
+                        else:
+                            st.caption("该用户暂无分析记录")
+                        # 每日Token明细
+                        _daily = _ud.get("token_usage", {}).get("daily", {})
+                        if _daily:
+                            st.markdown("**每日Token用量：**")
+                            for _day in sorted(_daily.keys(), reverse=True)[:7]:
+                                _dv = _daily[_day]
+                                st.caption(f"{_day} · {_dv.get('total', 0):,} tokens")
+                else:
+                    st.caption("暂无用户数据")
+
         st.markdown("---")
         st.markdown("""
 <div class="disclaimer">
