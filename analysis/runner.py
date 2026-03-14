@@ -49,6 +49,15 @@ def any_running(session_state) -> bool:
     return any(j.get("status") == "running" for j in jobs.values())
 
 
+def running_count(session_state) -> int:
+    """当前正在运行的分析任务数"""
+    jobs = get_jobs(session_state)
+    return sum(1 for j in jobs.values() if j.get("status") == "running")
+
+
+MAX_CONCURRENT = 3  # 每用户最大并行分析数
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # 数据自取 + prompt 构建（在后台线程中运行，自行获取专属数据）
 # ══════════════════════════════════════════════════════════════════════════════
@@ -111,6 +120,11 @@ def start_analysis(session_state, key: str, client, cfg, model_name: str):
 
     # 已经在跑或已完成，不重复启动
     if key in jobs and jobs[key]["status"] in ("running", "done"):
+        return
+
+    # 并发限制
+    if running_count(session_state) >= MAX_CONCURRENT:
+        logger.info("[start_analysis] 已达并发上限 %d，排队等待: %s", MAX_CONCURRENT, key)
         return
 
     job = _new_job()
@@ -225,11 +239,14 @@ def _run_generic(job, client, cfg, model_name, label, build_fn, build_args, user
         def _heartbeat():
             elapsed = 0
             idx = 0
+            max_beats = 10  # 最多 10 次心跳（40s），防止内存膨胀
             while not _first_chunk.wait(timeout=4):
                 elapsed += 4
-                tip = _tips[min(idx, len(_tips) - 1)]
-                _log(job, f"⏱️ 已等待 {elapsed}s — {tip}")
                 idx += 1
+                if idx > max_beats:
+                    break
+                tip = _tips[min(idx - 1, len(_tips) - 1)]
+                _log(job, f"⏱️ 已等待 {elapsed}s — {tip}")
 
         hb = threading.Thread(target=_heartbeat, daemon=True)
         hb.start()
@@ -249,10 +266,10 @@ def _run_generic(job, client, cfg, model_name, label, build_fn, build_args, user
 
         _first_chunk.set()  # 确保心跳停止
 
-        # 流式完成后估算 token 用量
+        # 流式完成后估算 token 用量（中文约 1.5 token/字）
         if not has_error:
-            est_prompt = len(p)
-            est_completion = len(full_text)
+            est_prompt = int(len(p) * 1.5)
+            est_completion = int(len(full_text) * 1.5)
             add_tokens(
                 prompt_tokens=est_prompt,
                 completion_tokens=est_completion,

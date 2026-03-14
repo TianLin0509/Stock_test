@@ -19,3 +19,6 @@ user_data/*.json
 
 # Analysis archive (full text, for backtesting)
 data/archive/
+
+# Logs
+logs/

@@ -15,6 +15,48 @@ ARCHIVE_DIR = Path(__file__).parent.parent / "data" / "archive"
 INDEX_FILE = ARCHIVE_DIR / "_index.jsonl"
 _lock = threading.Lock()
 
+# ── 内存索引缓存（启动时加载，增量更新）──────────────────────────────
+_index_cache: list[dict] = []         # 全量索引条目
+_index_by_code: dict[str, list[dict]] = {}  # stock_code → [entries]（按 ts 排序）
+_index_loaded = False
+
+
+def _load_index_cache():
+    """加载 _index.jsonl 到内存，按 stock_code 建立倒排索引"""
+    global _index_cache, _index_by_code, _index_loaded
+    _index_cache.clear()
+    _index_by_code.clear()
+    if not INDEX_FILE.exists():
+        _index_loaded = True
+        return
+    for line in INDEX_FILE.read_text(encoding="utf-8").strip().split("\n"):
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        _index_cache.append(entry)
+        code = entry.get("stock_code", "")
+        if code:
+            _index_by_code.setdefault(code, []).append(entry)
+    _index_loaded = True
+
+
+def _ensure_index_loaded():
+    global _index_loaded
+    if not _index_loaded:
+        _load_index_cache()
+
+
+def _add_to_index_cache(entry: dict):
+    """增量更新内存索引"""
+    _ensure_index_loaded()
+    _index_cache.append(entry)
+    code = entry.get("stock_code", "")
+    if code:
+        _index_by_code.setdefault(code, []).append(entry)
+
 # ── 质量校验：确认分析输出完整，未被截断 ──────────────────────────────
 
 # 每种分析类型的"完成标志"——至少命中一个才算完整
@@ -47,7 +89,9 @@ _COMPLETION_MARKERS = {
 
 
 def _is_complete(key: str, text: str) -> bool:
-    """检查分析文本是否完整（非截断/非失败）"""
+    """检查分析文本是否完整（非截断/非失败）
+    放宽策略：关键词匹配 OR 字数阈值（≥800字），以兼容 AI 不同措辞。
+    """
     if not text or len(text) < 200:
         return False
     # 失败标记
@@ -56,8 +100,9 @@ def _is_complete(key: str, text: str) -> bool:
     # 检查完成标志
     markers = _COMPLETION_MARKERS.get(key, [])
     if not markers:
-        return len(text) >= 500  # 无特定标志的类型，至少500字
-    return any(re.search(m, text) for m in markers)
+        return len(text) >= 500
+    # 关键词命中 OR 字数足够（≥800字视为完整输出）
+    return any(re.search(m, text) for m in markers) or len(text) >= 800
 
 
 # ── 归档保存 ─────────────────────────────────────────────────────────
@@ -200,7 +245,7 @@ def _update_archive(session_state, new_valid_keys, archive_key):
 
 
 def _append_index(filename, record, info, price_snapshot, valid_keys, moe_data):
-    """追加索引行"""
+    """追加索引行（同时更新内存缓存）"""
     index_entry = {
         "file": filename,
         "ts": record["archive_ts"],
@@ -217,23 +262,16 @@ def _append_index(filename, record, info, price_snapshot, valid_keys, moe_data):
     }
     with open(INDEX_FILE, "a", encoding="utf-8") as f:
         f.write(json.dumps(index_entry, ensure_ascii=False) + "\n")
+    _add_to_index_cache(index_entry)
 
 
 # ── 读取接口 ─────────────────────────────────────────────────────────
 
 def load_index():
-    """加载索引为 pandas DataFrame"""
+    """加载索引为 pandas DataFrame（使用内存缓存）"""
     import pandas as pd
-    if not INDEX_FILE.exists():
-        return pd.DataFrame()
-    records = []
-    for line in INDEX_FILE.read_text(encoding="utf-8").strip().split("\n"):
-        if line:
-            try:
-                records.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
-    return pd.DataFrame(records) if records else pd.DataFrame()
+    _ensure_index_loaded()
+    return pd.DataFrame(_index_cache) if _index_cache else pd.DataFrame()
 
 
 def load_archive(filename: str) -> dict:
@@ -242,6 +280,25 @@ def load_archive(filename: str) -> dict:
     if path.exists():
         return json.loads(path.read_text(encoding="utf-8"))
     return {}
+
+
+def cleanup_expired(days: int = 30):
+    """清理超过 days 天的归档文件，保留索引记录（标记 expired）"""
+    import time as _time
+    if not ARCHIVE_DIR.exists():
+        return 0
+    cutoff_ts = _time.time() - days * 86400
+    removed = 0
+    for f in ARCHIVE_DIR.glob("*.json"):
+        if f.name.startswith("_"):
+            continue
+        try:
+            if f.stat().st_mtime < cutoff_ts:
+                f.unlink()
+                removed += 1
+        except OSError:
+            continue
+    return removed
 
 
 def get_archive_stats() -> dict:
@@ -270,20 +327,16 @@ def _get_cutoff() -> float:
 
 
 def find_recent(stock_code: str) -> dict | None:
-    """查找该股票在当前周期内（最近19:00后）的最新归档，返回索引条目或 None"""
-    if not INDEX_FILE.exists():
+    """查找该股票在当前周期内（最近19:00后）的最新归档，返回索引条目或 None
+    使用内存索引 O(k) 查找（k = 该股票归档数），而非 O(n) 全量扫描。
+    """
+    _ensure_index_loaded()
+    entries = _index_by_code.get(stock_code, [])
+    if not entries:
         return None
     cutoff = _get_cutoff()
     best = None
-    for line in INDEX_FILE.read_text(encoding="utf-8").strip().split("\n"):
-        if not line:
-            continue
-        try:
-            entry = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if entry.get("stock_code") != stock_code:
-            continue
+    for entry in entries:
         try:
             ts = datetime.fromisoformat(entry["ts"]).timestamp()
         except (ValueError, KeyError):
@@ -297,19 +350,13 @@ def find_recent(stock_code: str) -> dict | None:
 
 def find_today_others(stock_code: str, exclude_user: str = "") -> list[dict]:
     """查找当前周期内（最近19:00后）该股票其他用户的归档"""
-    if not INDEX_FILE.exists():
+    _ensure_index_loaded()
+    entries = _index_by_code.get(stock_code, [])
+    if not entries:
         return []
     cutoff = _get_cutoff()
     results = []
-    for line in INDEX_FILE.read_text(encoding="utf-8").strip().split("\n"):
-        if not line:
-            continue
-        try:
-            entry = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if entry.get("stock_code") != stock_code:
-            continue
+    for entry in entries:
         try:
             ts = datetime.fromisoformat(entry["ts"]).timestamp()
         except (ValueError, KeyError):

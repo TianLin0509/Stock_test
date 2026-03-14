@@ -1,10 +1,14 @@
 """AI 客户端 — 多 Provider 统一调用层"""
 
 import logging
+import time as _time
 import threading
 from openai import OpenAI, APIConnectionError, AuthenticationError, RateLimitError
 from config import MODEL_CONFIGS
 from ai.doubao import doubao_call, doubao_stream
+
+_MAX_RETRIES = 3
+_RETRY_DELAYS = [2, 4, 8]  # 指数退避秒数
 
 logger = logging.getLogger(__name__)
 
@@ -108,47 +112,56 @@ def call_ai(client: OpenAI, cfg: dict, prompt: str,
     if cfg.get("provider") == "doubao" and cfg.get("supports_search"):
         text, err = doubao_call(cfg, messages, max_tokens)
         if not err:
-            # 豆包按字符粗估 token（1 中文字 ≈ 2 token）
-            est = len(prompt) + len(text)
+            # 豆包按字符粗估 token（中文约 1.5 token/字）
+            est = int((len(prompt) + len(text)) * 1.5)
             add_tokens(total_tokens=est, username=username)
         return text, err
 
     extra = _build_extra(cfg)
-    try:
-        resp = client.chat.completions.create(
-            model=cfg["model"],
-            messages=messages,
-            max_tokens=max_tokens,
-            **extra,
-        )
-        text = resp.choices[0].message.content or ""
-
-        # 提取 token 用量
-        if hasattr(resp, "usage") and resp.usage:
-            add_tokens(
-                prompt_tokens=resp.usage.prompt_tokens or 0,
-                completion_tokens=resp.usage.completion_tokens or 0,
-                total_tokens=resp.usage.total_tokens or 0,
-                username=username,
+    last_err = None
+    for attempt in range(_MAX_RETRIES):
+        try:
+            resp = client.chat.completions.create(
+                model=cfg["model"],
+                messages=messages,
+                max_tokens=max_tokens,
+                **extra,
             )
+            text = resp.choices[0].message.content or ""
 
-        return text, None
+            # 提取 token 用量
+            if hasattr(resp, "usage") and resp.usage:
+                add_tokens(
+                    prompt_tokens=resp.usage.prompt_tokens or 0,
+                    completion_tokens=resp.usage.completion_tokens or 0,
+                    total_tokens=resp.usage.total_tokens or 0,
+                    username=username,
+                )
 
-    except AuthenticationError as e:
-        return "", f"API Key 认证失败：{str(e)[:200]}"
-    except RateLimitError:
-        return "", "调用频率或额度超限，请稍后重试或切换其他模型"
-    except APIConnectionError as e:
-        return "", f"网络连接失败：{e}"
-    except Exception as e:
-        err = str(e)
-        if "invalid_api_key" in err.lower() or "401" in err:
-            return "", f"API Key 无效或模型不可用：{err[:200]}"
-        if "quota" in err.lower() or "insufficient" in err.lower():
-            return "", "账户余额不足，请充值或切换模型"
-        if "model_not_found" in err.lower() or "does not exist" in err.lower():
-            return "", f"模型不存在（{cfg['model']}），请联系开发者更新模型名称"
-        return "", f"AI 调用异常：{err[:120]}"
+            return text, None
+
+        except AuthenticationError as e:
+            return "", f"API Key 认证失败：{str(e)[:200]}"
+        except RateLimitError as e:
+            last_err = e
+            if attempt < _MAX_RETRIES - 1:
+                logger.info("[call_ai] RateLimitError, 重试 %d/%d (等待 %ds)",
+                            attempt + 1, _MAX_RETRIES, _RETRY_DELAYS[attempt])
+                _time.sleep(_RETRY_DELAYS[attempt])
+                continue
+            return "", "调用频率或额度超限（已重试3次），请稍后重试或切换其他模型"
+        except APIConnectionError as e:
+            return "", f"网络连接失败：{e}"
+        except Exception as e:
+            err = str(e)
+            if "invalid_api_key" in err.lower() or "401" in err:
+                return "", f"API Key 无效或模型不可用：{err[:200]}"
+            if "quota" in err.lower() or "insufficient" in err.lower():
+                return "", "账户余额不足，请充值或切换模型"
+            if "model_not_found" in err.lower() or "does not exist" in err.lower():
+                return "", f"模型不存在（{cfg['model']}），请联系开发者更新模型名称"
+            return "", f"AI 调用异常：{err[:120]}"
+    return "", f"AI 调用失败（重试耗尽）：{last_err}"
 
 
 def call_ai_stream(client: OpenAI, cfg: dict, prompt: str,

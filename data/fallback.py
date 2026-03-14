@@ -177,7 +177,7 @@ def em_get_basic_info(ts_code: str) -> tuple[dict, str | None]:
         secid = _eastmoney_secid(ts_code)
         url = (
             f"https://push2.eastmoney.com/api/qt/stock/get?"
-            f"secid={secid}&fields=f43,f44,f45,f46,f47,f48,f49,f50,f51,f52,"
+            f"secid={secid}&fields=f23,f43,f44,f45,f46,f47,f48,f49,f50,f51,f52,"
             f"f55,f57,f58,f60,f162,f167,f168,f170,f171&ut=fa5fd1943c7b386f172d6893dbfba10b"
         )
         resp = requests.get(url, timeout=10)
@@ -190,7 +190,7 @@ def em_get_basic_info(ts_code: str) -> tuple[dict, str | None]:
             "最新价(元)": str(data.get("f43", "N/A") / 100) if data.get("f43") else "N/A",
             "换手率(%)":  str(data.get("f168", "N/A") / 100) if data.get("f168") else "N/A",
             "市盈率TTM":  str(data.get("f167", "N/A") / 100) if data.get("f167") else "N/A",
-            "市净率PB":   str(data.get("f167", "N/A")),
+            "市净率PB":   str(data.get("f23", "N/A") / 100) if data.get("f23") else "N/A",
         }
         return result, None
     except Exception as e:

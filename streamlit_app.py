@@ -10,12 +10,26 @@ import time
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
-# 配置日志（DEBUG 级别输出到 stderr，不影响 Streamlit UI）
+# 配置日志（DEBUG → stderr + 文件按日轮转）
 logging.basicConfig(
     level=logging.DEBUG,
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     datefmt="%H:%M:%S",
 )
+try:
+    from logging.handlers import TimedRotatingFileHandler
+    _log_dir = Path(__file__).parent / "logs"
+    _log_dir.mkdir(exist_ok=True)
+    _file_handler = TimedRotatingFileHandler(
+        _log_dir / "app.log", when="midnight", backupCount=7, encoding="utf-8",
+    )
+    _file_handler.setLevel(logging.INFO)
+    _file_handler.setFormatter(logging.Formatter(
+        "%(asctime)s [%(name)s] %(levelname)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S",
+    ))
+    logging.getLogger().addHandler(_file_handler)
+except Exception:
+    pass  # 文件日志非关键路径，失败不影响主流程
 
 import streamlit as st
 
@@ -154,6 +168,17 @@ def main():
             return
 
     current_user = st.session_state["current_user"]
+
+    # ── 启动时清理过期归档（>30天） ─────────────────────────────────────
+    if "_archive_cleaned" not in st.session_state:
+        try:
+            from utils.archive import cleanup_expired
+            _removed = cleanup_expired(30)
+            if _removed:
+                logger.info("[main] 已清理 %d 个过期归档文件", _removed)
+        except Exception as e:
+            logger.debug("[main] 归档清理失败: %s", e)
+        st.session_state["_archive_cleaned"] = True
 
     # ── 启动调度器 ─────────────────────────────────────────────────────
     try:
@@ -393,13 +418,44 @@ def main():
             _go_label = "🚀 一键分析"
             _go_disabled = False
 
+        # 构建股票搜索候选列表（带缓存）
+        if "_stock_options" not in st.session_state:
+            try:
+                from data.tushare_client import load_stock_list
+                _sl_df, _ = load_stock_list()
+                if not _sl_df.empty:
+                    _opts = [
+                        f"{row.get('symbol', row.get('ts_code', '').split('.')[0])} {row.get('name', '')}"
+                        for _, row in _sl_df.iterrows()
+                    ]
+                    st.session_state["_stock_options"] = sorted(_opts)
+                else:
+                    st.session_state["_stock_options"] = []
+            except Exception:
+                st.session_state["_stock_options"] = []
+
+        _stock_options = st.session_state["_stock_options"]
+
         _search_col, _go_col, _reset_col = st.columns([3, 2, 1.2])
         with _search_col:
-            query = st.text_input(
-                "搜索股票", label_visibility="collapsed",
-                placeholder="🔍 股票代码或名称…",
-                key="query_input",
-            )
+            if _stock_options:
+                # 如果有预加载候选，提供 selectbox（自带搜索过滤）
+                _default_idx = None
+                _prev_q = st.session_state.get("query_input", "")
+                if _prev_q and _prev_q in _stock_options:
+                    _default_idx = _stock_options.index(_prev_q)
+                query = st.selectbox(
+                    "搜索股票", options=_stock_options,
+                    index=_default_idx, label_visibility="collapsed",
+                    placeholder="🔍 输入股票代码或名称搜索…",
+                    key="query_input",
+                )
+            else:
+                query = st.text_input(
+                    "搜索股票", label_visibility="collapsed",
+                    placeholder="🔍 股票代码或名称…",
+                    key="query_input",
+                )
         with _go_col:
             _go_clicked = st.button(_go_label, type="secondary",
                                      use_container_width=True, key="btn_go",
@@ -486,6 +542,10 @@ def main():
   ⚠️ <strong>部分数据获取受限</strong>：{' | '.join(data_errors[:3])}
 </div>""", unsafe_allow_html=True)
 
+        # 最低数据量校验：至少 20 天交易数据
+        if not df.empty and len(df) < 20:
+            st.warning(f"⚠️ 仅获取到 {len(df)} 天交易数据（建议至少 20 天），分析结果可能不准确。")
+
         # ── 智能归档恢复：先加载缓存，已有的 key 不再花 token ──
         from utils.archive import find_recent, load_archive
         _recent = find_recent(ts_code)
@@ -502,6 +562,10 @@ def main():
                 _from_user = _recent.get("username", "")
                 st.session_state["_shared_from"] = (
                     f"{_from_user} · {_recent.get('model', '')} · {_ts_short}"
+                )
+                st.session_state["_archive_restored"] = (
+                    f"已从归档恢复 {len(restored)} 项分析"
+                    f"（{_from_user} · {_recent.get('model', '')} · {_ts_short}）"
                 )
                 logger.debug("[resolve] 从归档恢复 %d 项分析: %s",
                              len(restored), list(restored.keys()))
@@ -530,6 +594,11 @@ def main():
     # ══════════════════════════════════════════════════════════════════════
     stock_ready = bool(st.session_state.get("stock_name"))
     analyses = st.session_state.get("analyses", {})
+
+    # 归档恢复醒目提示
+    _archive_msg = st.session_state.pop("_archive_restored", None)
+    if _archive_msg:
+        st.success(f"✅ {_archive_msg}")
     client, cfg_now, ai_err = get_ai_client(selected_model)
 
     # 搜索栏"一键分析"按钮触发逻辑
@@ -537,6 +606,8 @@ def main():
         if not query:
             st.toast("请先输入股票代码或名称")
         else:
+            # selectbox 值格式为 "代码 名称"，提取代码部分
+            query = query.split()[0] if query and " " in query else query
             _last_q = st.session_state.get("_last_query", "")
             _need_fetch = not stock_ready or query != _last_q
             if _need_fetch:
