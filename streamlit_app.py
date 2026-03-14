@@ -475,7 +475,7 @@ def main():
         for k in ["analyses", "moe_results", "stock_fin",
                    "valuation_df",
                    "qa_history", "similarity_results", "_show_sim",
-                   "active_tab", "_jobs"]:
+                   "active_tab", "active_view", "_auto_sim", "_jobs"]:
             st.session_state.pop(k, None)
         for k in list(st.session_state.keys()):
             if k.startswith("_confirm_redo_"):

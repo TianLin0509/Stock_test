@@ -40,6 +40,14 @@ def _parse_advice(text: str) -> str:
     return ""
 
 
+def _parse_mid_advice(text: str) -> str:
+    """从 AI 回复中提取中期建议"""
+    m = re.search(r"中期建议[：:]\s*[*]*\s*(强烈推荐|推荐|观望|回避)", text)
+    if m:
+        return m.group(1)
+    return ""
+
+
 def _safe_float(v):
     if v is None:
         return None
@@ -107,6 +115,7 @@ def score_single_stock(client, cfg, row: pd.Series,
     score = _parse_score(text) if not err else 0.0
     sub_scores = _parse_sub_scores(text) if not err else {}
     advice = _parse_advice(text) if not err else ""
+    mid_advice = _parse_mid_advice(text) if not err else ""
 
     return {
         "代码": code,
@@ -119,6 +128,7 @@ def score_single_stock(client, cfg, row: pd.Series,
         "题材热度": sub_scores.get("题材热度"),
         "技术面": sub_scores.get("技术面"),
         "短线建议": advice,
+        "中期建议": mid_advice,
         "AI分析": text if not err else f"分析失败：{err}",
         "模型": model_name,
         "人气排名": hot_rank,

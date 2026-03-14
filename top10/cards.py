@@ -1,17 +1,17 @@
-"""Top 10 精简卡片 — 内嵌到 Stock_test 的折叠区"""
+"""Top 10 精简卡片 — 三分类 Tab 展示"""
 
 import math
 import pandas as pd
 import streamlit as st
 
 
-def show_top10_cards(df: pd.DataFrame):
-    """展示精简版 Top 10 推荐股票卡片，含"分析此股"按钮"""
+def _render_cards(df: pd.DataFrame, max_cards: int = 10):
+    """渲染股票卡片列表"""
     if df.empty:
-        st.info("暂无推荐结果")
+        st.info("暂无符合条件的推荐结果")
         return
 
-    top = df.head(10)
+    top = df.head(max_cards)
 
     for i, (_, row) in enumerate(top.iterrows(), 1):
         score = row.get("综合评分", 0)
@@ -20,6 +20,7 @@ def show_top10_cards(df: pd.DataFrame):
         price = row.get("最新价", 0)
         change = row.get("涨跌幅", 0)
         advice = row.get("短线建议", "")
+        mid_advice = row.get("中期建议", "")
         industry = row.get("行业", "")
         s_fund = row.get("基本面")
         s_theme = row.get("题材热度")
@@ -58,6 +59,20 @@ def show_top10_cards(df: pd.DataFrame):
             border-radius:50px; padding:2px 10px;
             font-weight:700; font-size:0.78rem; margin-left:10px;
         ">{adv_text}</span>""" if adv_text else ""
+
+        # 中期建议标签
+        mid_map = {
+            "强烈推荐": ("#7c3aed", "#f5f3ff", "📈 中期强推"),
+            "推荐": ("#2563eb", "#eff6ff", "📊 中期推荐"),
+            "观望": ("#d97706", "#fffbeb", "⏳ 中期观望"),
+            "回避": ("#6b7280", "#f3f4f6", "📉 中期回避"),
+        }
+        mid_color, mid_bg, mid_text = mid_map.get(mid_advice, ("#6b7280", "#f3f4f6", ""))
+        mid_html = f"""<span style="
+            background:{mid_bg}; color:{mid_color};
+            border-radius:50px; padding:2px 10px;
+            font-weight:700; font-size:0.78rem; margin-left:4px;
+        ">{mid_text}</span>""" if mid_text else ""
 
         # 行业标签
         industry_html = f"""<span style="
@@ -110,7 +125,6 @@ def show_top10_cards(df: pd.DataFrame):
                     </span>
                     <span style="font-size:0.82rem; color:#6b7280; margin-left:8px;">{code}</span>
                     {industry_html}
-                    {advice_html}
                 </div>
                 <div style="
                     background:{badge_bg}; color:{badge_color};
@@ -118,16 +132,84 @@ def show_top10_cards(df: pd.DataFrame):
                     font-weight:800; font-size:1rem;
                 ">{score}/10</div>
             </div>
-            <div style="display:flex; gap:16px; font-size:0.85rem; color:#6b7280;">
+            <div style="display:flex; gap:16px; align-items:center; font-size:0.85rem; color:#6b7280; flex-wrap:wrap;">
                 <span>💰 {price_str}元</span>
                 <span style="color:{change_color}; font-weight:600;">{change_str}%</span>
+                {advice_html}
+                {mid_html}
             </div>
             {sub_section}
         </div>""", unsafe_allow_html=True)
 
         # "分析此股"按钮
-        if st.button(f"🔍 深度分析 {name}", key=f"top10_pick_{code}", use_container_width=True):
+        if st.button(f"🔍 深度分析 {name}", key=f"top10_pick_{code}_{i}", use_container_width=True):
             st.session_state["_top10_pick"] = code
+
+
+def _filter_short_term(df: pd.DataFrame, n: int = 5) -> pd.DataFrame:
+    """筛选短线精选：按技术面评分+短线建议排序"""
+    if df.empty:
+        return df
+    tmp = df.copy()
+    # 短线建议权重
+    advice_weight = {"强烈推荐": 4, "推荐": 3, "观望": 1, "回避": 0}
+    tmp["_short_w"] = tmp["短线建议"].map(advice_weight).fillna(1)
+    tech_col = tmp["技术面"].fillna(0) if "技术面" in tmp.columns else 0
+    tmp["_short_score"] = tmp["_short_w"] * 2.5 + tech_col
+    # 排除"回避"和"观望"（如果有足够的推荐/强烈推荐）
+    good = tmp[tmp["短线建议"].isin(["强烈推荐", "推荐"])]
+    if len(good) >= n:
+        result = good.nlargest(n, "_short_score")
+    else:
+        result = tmp.nlargest(n, "_short_score")
+    return result.drop(columns=["_short_w", "_short_score"]).reset_index(drop=True)
+
+
+def _filter_mid_term(df: pd.DataFrame, n: int = 5) -> pd.DataFrame:
+    """筛选中期布局：按基本面+中期建议排序"""
+    if df.empty:
+        return df
+    tmp = df.copy()
+    advice_weight = {"强烈推荐": 4, "推荐": 3, "观望": 1, "回避": 0}
+    tmp["_mid_w"] = tmp["中期建议"].map(advice_weight).fillna(1) if "中期建议" in tmp.columns else 1
+    fund_col = tmp["基本面"].fillna(0) if "基本面" in tmp.columns else 0
+    tmp["_mid_score"] = tmp["_mid_w"] * 2.5 + fund_col
+    good = tmp[tmp.get("中期建议", pd.Series(dtype=str)).isin(["强烈推荐", "推荐"])] if "中期建议" in tmp.columns else pd.DataFrame()
+    if len(good) >= n:
+        result = good.nlargest(n, "_mid_score")
+    else:
+        result = tmp.nlargest(n, "_mid_score")
+    return result.drop(columns=["_mid_w", "_mid_score"]).reset_index(drop=True)
+
+
+def show_top10_cards(df: pd.DataFrame):
+    """三分类 Tab 展示：综合Top10 / 短线精选Top5 / 中期布局Top5"""
+    if df.empty:
+        st.info("暂无推荐结果")
+        return
+
+    tab_all, tab_short, tab_mid = st.tabs([
+        "📊 综合 Top10", "⚡ 短线精选 Top5", "🏗️ 中期布局 Top5"
+    ])
+
+    with tab_all:
+        _render_cards(df, max_cards=10)
+
+    with tab_short:
+        short_df = _filter_short_term(df, 5)
+        if short_df.empty or (short_df["短线建议"] == "观望").all():
+            st.caption("今日暂无明确短线机会，以下为技术面评分最高的 5 只")
+        else:
+            st.caption("按技术面评分 + 短线建议综合筛选，适合短线交易者")
+        _render_cards(short_df, max_cards=5)
+
+    with tab_mid:
+        mid_df = _filter_mid_term(df, 5)
+        if mid_df.empty:
+            st.caption("今日暂无明确中期布局标的")
+        else:
+            st.caption("按基本面评分 + 中期建议综合筛选，适合中线持仓布局")
+        _render_cards(mid_df, max_cards=5)
 
 
 def show_progress(job: dict):
