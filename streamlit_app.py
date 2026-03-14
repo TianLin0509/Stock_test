@@ -95,6 +95,7 @@ def _show_login():
 
 def _save_analysis_to_history():
     """保存当前分析到用户历史 + 完整归档（查询新股票前调用）"""
+    st.session_state.pop("_cached_user_data", None)  # 清除缓存，下次重新加载
     username = st.session_state.get("current_user", "")
     stock_name = st.session_state.get("stock_name", "")
     stock_code = st.session_state.get("stock_code", "")
@@ -272,8 +273,12 @@ def main():
 
         st.markdown("---")
         st.markdown("### 📜 分析历史")
-        from utils.user_store import load_user
-        _udata = load_user(current_user)
+        # 缓存用户数据到 session_state，避免每次 rerun 读文件
+        _cache_key = "_cached_user_data"
+        if _cache_key not in st.session_state:
+            from utils.user_store import load_user
+            st.session_state[_cache_key] = load_user(current_user)
+        _udata = st.session_state[_cache_key]
         _hist = _udata.get("history", [])
         if _hist:
             for _entry in reversed(_hist[-10:]):
@@ -1117,7 +1122,7 @@ def main():
                 logger.debug("[poll] 共享缓存保存失败: %s", e)
 
         if _is_running_now:
-            time.sleep(1.5)
+            time.sleep(0.5)
             st.rerun()
 
 
@@ -1585,13 +1590,13 @@ def _show_mystic(client, cfg, model_name):
 
     with st.status("🔮 正卦象推演中...", expanded=True) as status:
         st.write("📅 获取今日日期与天干地支...")
-        time.sleep(0.6)
+        time.sleep(0.3)
         st.write("🌙 查询黄历宜忌...")
-        time.sleep(0.5)
+        time.sleep(0.25)
         st.write("🎴 抽取今日塔罗牌...")
-        time.sleep(0.5)
+        time.sleep(0.25)
         st.write("🐉 推算生肖与五行运势...")
-        time.sleep(0.4)
+        time.sleep(0.2)
         st.write("🔮 综合推演炒股运势，请虔诚等待...")
 
         stock_name = st.session_state.get("stock_name", "")
