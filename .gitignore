@@ -16,3 +16,6 @@ data/history/all_daily.parquet
 
 # User data (JSON persistence, not for git)
 user_data/*.json
+
+# Analysis archive (full text, for backtesting)
+data/archive/

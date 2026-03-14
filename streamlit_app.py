@@ -84,7 +84,7 @@ def _show_login():
 
 
 def _save_analysis_to_history():
-    """保存当前分析到用户历史（查询新股票前调用）"""
+    """保存当前分析到用户历史 + 完整归档（查询新股票前调用）"""
     username = st.session_state.get("current_user", "")
     stock_name = st.session_state.get("stock_name", "")
     stock_code = st.session_state.get("stock_code", "")
@@ -96,6 +96,13 @@ def _save_analysis_to_history():
                               "sentiment", "sector", "holders"] if analyses.get(k)]
     if not done_keys:
         return
+
+    # 完整归档（含全文，供回测）
+    try:
+        from utils.archive import save_archive
+        save_archive(st.session_state)
+    except Exception:
+        pass
 
     # 生成摘要：每个分析取前80字
     parts = []
@@ -289,6 +296,15 @@ def main():
                                 st.caption(f"{_day} · {_dv.get('total', 0):,} tokens")
                 else:
                     st.caption("暂无用户数据")
+
+                # 归档统计
+                st.markdown("---")
+                from utils.archive import get_archive_stats
+                _astats = get_archive_stats()
+                st.markdown(
+                    f"**📦 分析归档：** {_astats['count']} 条 · {_astats['size_mb']} MB"
+                )
+                st.caption("完整分析文本存于 `data/archive/`，可用于回测")
 
         st.markdown("---")
         st.markdown("""
