@@ -161,8 +161,12 @@ def main():
     except Exception as e:
         logger.debug("[main] Top10调度器启动失败: %s", e)
 
+    # ── 上方区域折叠控制 ──────────────────────────────────────────────────
+    _upper_collapsed = st.session_state.get("_upper_collapsed", False)
+
     # ── Header ────────────────────────────────────────────────────────────
-    st.markdown("""
+    if not _upper_collapsed:
+        st.markdown("""
 <div class="app-header">
   <h1>📈 呆瓜方后援会专属投研助手</h1>
   <p>预期差挖掘 · K线趋势研判 · 基本面剖析 · MoE多角色辩论裁决</p>
@@ -355,132 +359,152 @@ def main():
                  "sentiment", "sector", "holders"]:
         collect_result(st.session_state, key)
 
-    # ══════════════════════════════════════════════════════════════════════
-    # 🏆 今日 Top10 推荐（折叠区）
-    # ══════════════════════════════════════════════════════════════════════
-    from top10.runner import (
-        get_cached_result as top10_get_cached,
-        get_cached_summary as top10_get_summary,
-        get_cached_meta as top10_get_meta,
-        get_all_cached_models as top10_all_models,
-    )
-    from top10.cards import show_top10_cards
-    from top10.deep_runner import get_deep_status, is_deep_running, start_deep_top10_async
-
-    # 尝试找到今日已有缓存的模型（优先选中模型，否则取第一个有缓存的）
-    _top10_cached = top10_get_cached(selected_model)
-    _top10_display_model = selected_model
-    if _top10_cached is None:
-        for _m in top10_all_models():
-            _try = top10_get_cached(_m)
-            if _try is not None:
-                _top10_cached = _try
-                _top10_display_model = _m
-                break
-
-    # 构建 Top10 标题（含触发者信息）
-    _top10_meta = top10_get_meta(_top10_display_model) if _top10_cached is not None else None
-    _top10_title = "🏆 今日 Top10 推荐"
-    if _top10_meta:
-        _m_user = _top10_meta.get("user", "")
-        _m_tokens = _top10_meta.get("tokens", 0)
-        if _m_tokens >= 10000:
-            _m_tokens_display = f"{_m_tokens / 10000:.1f}万"
-        else:
-            _m_tokens_display = f"{_m_tokens:,}"
-        if _m_user:
-            _top10_title += f"　(分析来自 **{_m_user}**，共消耗 **{_m_tokens_display}** token)"
-
-    with st.expander(_top10_title, expanded=False):
-        if _top10_cached is not None:
-            # 已有今日结果 → 直接展示
-            _top10_summary = top10_get_summary(_top10_display_model)
-            if _top10_summary:
-                st.markdown(_top10_summary)
-                st.markdown("---")
-            show_top10_cards(_top10_cached)
-
-            # Token 消耗小贴士（底部淡色显示）
-            _ds = get_deep_status()
-            if _ds and _ds.get("status") == "done" and _ds.get("tokens_used"):
-                _total_tk = _ds["tokens_used"]
-                _scored_n = _ds.get("scored_count", 0)
-                _deep_n = _ds.get("deep_count", 0)
-                _started = _ds.get("started", "")[:16].replace("T", " ")
-                _finished = _ds.get("finished", "")[:16].replace("T", " ")
-                if _total_tk >= 10000:
-                    _tk_str = f"{_total_tk / 10000:.1f}万"
-                else:
-                    _tk_str = f"{_total_tk:,}"
-                _avg = _total_tk // _deep_n if _deep_n else 0
-                st.markdown(
-                    f'<div style="text-align:center;color:#9ca3af;font-size:0.72rem;'
-                    f'margin-top:12px;padding:6px;border-top:1px solid #f1f5f9;">'
-                    f'🪙 本次分析共消耗 <b>{_tk_str}</b> token '
-                    f'（{_scored_n}只评分 + {_deep_n}只深度分析，'
-                    f'均值 {_avg:,}/只） · '
-                    f'{_started} ~ {_finished}'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
-        elif is_deep_running():
-            # 深度分析正在运行
-            _deep_status = get_deep_status() or {}
-            _phase = _deep_status.get("phase", "初始化")
-            st.info(f"🔬 深度 Top10 分析正在后台运行中（当前阶段：**{_phase}**）")
-            st.caption("分析完成后刷新页面即可查看结果")
-            time.sleep(3)
-            st.rerun()
-        else:
-            # 无缓存
-            _deep_status = get_deep_status()
-            if _deep_status and _deep_status.get("status") == "error":
-                st.error(f"上次深度分析失败：{_deep_status.get('error', '未知错误')}")
-
-            st.caption("每晚 22:00 自动运行深度分析（100只候选全量深度分析 + MoE辩论），结果每日刷新。")
-
-            # 仅管理员 LT 可手动触发
-            if current_user == "LT":
-                st.markdown("---")
-                st.markdown("##### 🔧 管理员操作")
-                _admin_col1, _admin_col2 = st.columns([2, 1])
-                with _admin_col1:
-                    _admin_model = st.selectbox(
-                        "分析模型", MODEL_NAMES,
-                        index=MODEL_NAMES.index("🟤 豆包 · Seed 2.0 Mini")
-                        if "🟤 豆包 · Seed 2.0 Mini" in MODEL_NAMES else 0,
-                        key="admin_top10_model",
-                    )
-                with _admin_col2:
-                    _admin_pool = st.number_input(
-                        "候选池", min_value=20, max_value=200, value=100,
-                        step=10, key="admin_top10_pool",
-                    )
-                if st.button("🚀 手动触发深度 Top10 分析", type="primary",
-                             use_container_width=True, key="btn_admin_deep_top10"):
-                    ok = start_deep_top10_async(
-                        model_name=_admin_model,
-                        candidate_count=_admin_pool,
-                        username=current_user,
-                    )
-                    if ok:
-                        st.success("✅ 深度分析已在后台启动，预计需要较长时间，请稍后刷新查看")
-                    else:
-                        st.warning("⏳ 已有分析任务在运行中")
-                    st.rerun()
-
-    # ══════════════════════════════════════════════════════════════════════
-    # 搜索栏（支持 Top10 点击跳转）
-    # ══════════════════════════════════════════════════════════════════════
+    # ── 折叠时：展开按钮 + 简化状态 ──────────────────────────────────────
     _top10_pick = st.session_state.pop("_top10_pick", None)
-    if _top10_pick:
-        st.session_state["query_input"] = _top10_pick
 
-    query = st.text_input(
-        "搜索股票", label_visibility="collapsed",
-        placeholder="🔍  输入股票代码（如 000858）或名称（如 五粮液）…",
-        key="query_input",
-    )
+    if _upper_collapsed:
+        if _top10_pick:
+            st.session_state["query_input"] = _top10_pick
+            st.session_state["_upper_collapsed"] = False
+            st.rerun()
+        query = st.session_state.get("_last_query", "")
+        _auto_search = False
+        _sn = st.session_state.get("stock_name", "")
+        _sc = st.session_state.get("stock_code", "")
+        _expand_label = f"▽ {_sn}（{_sc}）" if _sn else "▽ 展开搜索区域"
+        if st.button(_expand_label, key="btn_expand_upper", use_container_width=True):
+            if "_last_query" in st.session_state:
+                st.session_state["query_input"] = st.session_state["_last_query"]
+            st.session_state["_upper_collapsed"] = False
+            st.rerun()
+
+    if not _upper_collapsed:
+        # ══════════════════════════════════════════════════════════════════════
+        # 🏆 今日 Top10 推荐（折叠区）
+        # ══════════════════════════════════════════════════════════════════════
+        from top10.runner import (
+            get_cached_result as top10_get_cached,
+            get_cached_summary as top10_get_summary,
+            get_cached_meta as top10_get_meta,
+            get_all_cached_models as top10_all_models,
+        )
+        from top10.cards import show_top10_cards
+        from top10.deep_runner import get_deep_status, is_deep_running, start_deep_top10_async
+
+        # 尝试找到今日已有缓存的模型（优先选中模型，否则取第一个有缓存的）
+        _top10_cached = top10_get_cached(selected_model)
+        _top10_display_model = selected_model
+        if _top10_cached is None:
+            for _m in top10_all_models():
+                _try = top10_get_cached(_m)
+                if _try is not None:
+                    _top10_cached = _try
+                    _top10_display_model = _m
+                    break
+
+        # 构建 Top10 标题（含触发者信息）
+        _top10_meta = top10_get_meta(_top10_display_model) if _top10_cached is not None else None
+        _top10_title = "🏆 今日 Top10 推荐"
+        if _top10_meta:
+            _m_user = _top10_meta.get("user", "")
+            _m_tokens = _top10_meta.get("tokens", 0)
+            if _m_tokens >= 10000:
+                _m_tokens_display = f"{_m_tokens / 10000:.1f}万"
+            else:
+                _m_tokens_display = f"{_m_tokens:,}"
+            if _m_user:
+                _top10_title += f"　(分析来自 **{_m_user}**，共消耗 **{_m_tokens_display}** token)"
+
+        with st.expander(_top10_title, expanded=False):
+            if _top10_cached is not None:
+                # 已有今日结果 → 直接展示
+                _top10_summary = top10_get_summary(_top10_display_model)
+                if _top10_summary:
+                    st.markdown(_top10_summary)
+                    st.markdown("---")
+                show_top10_cards(_top10_cached)
+
+                # Token 消耗小贴士（底部淡色显示）
+                _ds = get_deep_status()
+                if _ds and _ds.get("status") == "done" and _ds.get("tokens_used"):
+                    _total_tk = _ds["tokens_used"]
+                    _scored_n = _ds.get("scored_count", 0)
+                    _deep_n = _ds.get("deep_count", 0)
+                    _started = _ds.get("started", "")[:16].replace("T", " ")
+                    _finished = _ds.get("finished", "")[:16].replace("T", " ")
+                    if _total_tk >= 10000:
+                        _tk_str = f"{_total_tk / 10000:.1f}万"
+                    else:
+                        _tk_str = f"{_total_tk:,}"
+                    _avg = _total_tk // _deep_n if _deep_n else 0
+                    st.markdown(
+                        f'<div style="text-align:center;color:#9ca3af;font-size:0.72rem;'
+                        f'margin-top:12px;padding:6px;border-top:1px solid #f1f5f9;">'
+                        f'🪙 本次分析共消耗 <b>{_tk_str}</b> token '
+                        f'（{_scored_n}只评分 + {_deep_n}只深度分析，'
+                        f'均值 {_avg:,}/只） · '
+                        f'{_started} ~ {_finished}'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+            elif is_deep_running():
+                # 深度分析正在运行
+                _deep_status = get_deep_status() or {}
+                _phase = _deep_status.get("phase", "初始化")
+                st.info(f"🔬 深度 Top10 分析正在后台运行中（当前阶段：**{_phase}**）")
+                st.caption("分析完成后刷新页面即可查看结果")
+                time.sleep(3)
+                st.rerun()
+            else:
+                # 无缓存
+                _deep_status = get_deep_status()
+                if _deep_status and _deep_status.get("status") == "error":
+                    st.error(f"上次深度分析失败：{_deep_status.get('error', '未知错误')}")
+
+                st.caption("每晚 22:00 自动运行深度分析（100只候选全量深度分析 + MoE辩论），结果每日刷新。")
+
+                # 仅管理员 LT 可手动触发
+                if current_user == "LT":
+                    st.markdown("---")
+                    st.markdown("##### 🔧 管理员操作")
+                    _admin_col1, _admin_col2 = st.columns([2, 1])
+                    with _admin_col1:
+                        _admin_model = st.selectbox(
+                            "分析模型", MODEL_NAMES,
+                            index=MODEL_NAMES.index("🟤 豆包 · Seed 2.0 Mini")
+                            if "🟤 豆包 · Seed 2.0 Mini" in MODEL_NAMES else 0,
+                            key="admin_top10_model",
+                        )
+                    with _admin_col2:
+                        _admin_pool = st.number_input(
+                            "候选池", min_value=20, max_value=200, value=100,
+                            step=10, key="admin_top10_pool",
+                        )
+                    if st.button("🚀 手动触发深度 Top10 分析", type="primary",
+                                 use_container_width=True, key="btn_admin_deep_top10"):
+                        ok = start_deep_top10_async(
+                            model_name=_admin_model,
+                            candidate_count=_admin_pool,
+                            username=current_user,
+                        )
+                        if ok:
+                            st.success("✅ 深度分析已在后台启动，预计需要较长时间，请稍后刷新查看")
+                        else:
+                            st.warning("⏳ 已有分析任务在运行中")
+                        st.rerun()
+
+        # ══════════════════════════════════════════════════════════════════════
+        # 搜索栏（支持 Top10 点击跳转）
+        # ══════════════════════════════════════════════════════════════════════
+        if _top10_pick:
+            st.session_state["query_input"] = _top10_pick
+
+        query = st.text_input(
+            "搜索股票", label_visibility="collapsed",
+            placeholder="🔍  输入股票代码（如 000858）或名称（如 五粮液）…",
+            key="query_input",
+        )
+        _auto_search = bool(_top10_pick)
 
     # ══════════════════════════════════════════════════════════════════════
     # Tab 布局
@@ -491,9 +515,6 @@ def main():
     tab_analysis, tab_compare, tab_backtest, tab_moe, tab_mystic, tab_qa = st.tabs(
         ["📊 智能分析", "⚖️ 股票对比", "📈 回测战绩", "🎯 六方会谈", "🔮 趣味玄学", "💬 互动问答"]
     )
-
-    # Top10 点击自动触发搜索
-    _auto_search = bool(_top10_pick)
 
     # ══════════════════════════════════════════════════════════════════════
     # 股票解析 + 最少数据获取（由一键分析或各分析按钮触发）
@@ -675,6 +696,8 @@ def main():
                     need_rerun = True
 
         if need_rerun:
+            if stock_ready:
+                st.session_state["_upper_collapsed"] = True
             st.rerun()
 
         # ── 紧凑状态栏 ──────────────────────────────────────────

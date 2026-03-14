@@ -419,10 +419,29 @@ hr { border-color: var(--border) !important; margin: 1rem 0 !important; }
     width: 100% !important;
   }
 
-  /* 按钮行：每行2个，不完全堆叠 */
+  /* 操作按钮行：保持单行横排，类似子标签 */
+  [data-testid="stHorizontalBlock"]:has(.stButton) {
+    flex-wrap: nowrap !important;
+    gap: 0.15rem !important;
+  }
   [data-testid="stHorizontalBlock"]:has(.stButton) > div[data-testid="column"] {
-    flex: 1 1 46% !important;
-    min-width: 46% !important;
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    width: auto !important;
+  }
+  /* 按钮：紧凑风格，与上级标签区分 */
+  [data-testid="stHorizontalBlock"]:has(.stButton) .stButton button {
+    font-size: 0.75rem !important;
+    padding: 0.3rem 0.4rem !important;
+    min-height: 34px !important;
+    border-radius: 20px !important;
+    white-space: nowrap !important;
+  }
+  [data-testid="stHorizontalBlock"]:has(.stButton) .stButton button:not([kind="primary"]) {
+    background: var(--bg-card) !important;
+    border: 1.5px solid var(--border) !important;
+    color: var(--text-mid) !important;
+    box-shadow: none !important;
   }
 
   /* 指标卡片：每行2个 */
@@ -496,11 +515,16 @@ hr { border-color: var(--border) !important; margin: 1rem 0 !important; }
     font-size: 0.92rem !important;
   }
 
-  /* 极窄屏：按钮和指标也完全单列 */
-  [data-testid="stHorizontalBlock"]:has(.stButton) > div[data-testid="column"],
+  /* 极窄屏：指标完全单列 */
   [data-testid="stHorizontalBlock"]:has([data-testid="metric-container"]) > div[data-testid="column"] {
     flex: 1 1 100% !important;
     min-width: 100% !important;
+  }
+  /* 按钮更紧凑但保持横排 */
+  [data-testid="stHorizontalBlock"]:has(.stButton) .stButton button {
+    font-size: 0.68rem !important;
+    padding: 0.25rem 0.3rem !important;
+    min-height: 30px !important;
   }
 }
 </style>
