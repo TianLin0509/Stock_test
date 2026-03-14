@@ -5,8 +5,8 @@ import pandas as pd
 import streamlit as st
 
 
-def _render_cards(df: pd.DataFrame, max_cards: int = 10):
-    """渲染股票卡片列表"""
+def _render_cards(df: pd.DataFrame, max_cards: int = 10, key_prefix: str = "all"):
+    """渲染股票卡片列表，key_prefix 用于区分不同 tab 避免 key 冲突"""
     if df.empty:
         st.info("暂无符合条件的推荐结果")
         return
@@ -142,7 +142,7 @@ def _render_cards(df: pd.DataFrame, max_cards: int = 10):
         </div>""", unsafe_allow_html=True)
 
         # "分析此股"按钮
-        if st.button(f"🔍 深度分析 {name}", key=f"top10_pick_{code}_{i}", use_container_width=True):
+        if st.button(f"🔍 深度分析 {name}", key=f"top10_{key_prefix}_{code}_{i}", use_container_width=True):
             st.session_state["_top10_pick"] = code
 
 
@@ -193,7 +193,7 @@ def show_top10_cards(df: pd.DataFrame):
     ])
 
     with tab_all:
-        _render_cards(df, max_cards=10)
+        _render_cards(df, max_cards=10, key_prefix="all")
 
     with tab_short:
         short_df = _filter_short_term(df, 5)
@@ -201,7 +201,7 @@ def show_top10_cards(df: pd.DataFrame):
             st.caption("今日暂无明确短线机会，以下为技术面评分最高的 5 只")
         else:
             st.caption("按技术面评分 + 短线建议综合筛选，适合短线交易者")
-        _render_cards(short_df, max_cards=5)
+        _render_cards(short_df, max_cards=5, key_prefix="short")
 
     with tab_mid:
         mid_df = _filter_mid_term(df, 5)
@@ -209,7 +209,7 @@ def show_top10_cards(df: pd.DataFrame):
             st.caption("今日暂无明确中期布局标的")
         else:
             st.caption("按基本面评分 + 中期建议综合筛选，适合中线持仓布局")
-        _render_cards(mid_df, max_cards=5)
+        _render_cards(mid_df, max_cards=5, key_prefix="mid")
 
 
 def show_progress(job: dict):
