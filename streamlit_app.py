@@ -70,7 +70,7 @@ def _show_login():
     with col_center:
         st.markdown("#### 👤 请输入用户名登录")
         username = st.text_input(
-            "用户名", placeholder="例如：alice、张三",
+            "用户名", placeholder="例如：呆瓜方、章鱼哥...",
             key="_login_username", label_visibility="collapsed",
         )
         if st.button("🚀 登录", type="primary", use_container_width=True):
