@@ -4,7 +4,7 @@
 Phase 1: 获取候选池（人气榜+成交额榜 → 合并 → 初筛 → 100只）
 Phase 2: Tushare 数据增强（PE/PB/K线摘要/行业）
 Phase 3: 并行 AI 三维评分（基本面/题材/技术面）
-Phase 4: 对评分 Top30 做深度分析（6维，不含 MoE）写入 shared_cache
+Phase 4: 对评分 Top30 做深度分析（6维，不含 MoE）写入 archive
 Phase 5: 排序取 Top10，生成一句话精选理由
 Phase 6: 保存缓存 + 发送邮件
 """
@@ -147,13 +147,13 @@ def _deep_analyze_one(client, cfg, model_name: str,
         if not err:
             analyses["holders"] = text
 
-        # 保存到 shared_cache（不含 MoE，用户可在六方会谈 Tab 手动触发）
+        # 保存到 archive（不含 MoE，用户可在六方会谈 Tab 手动触发）
         moe_results = None
-        from utils.shared_cache import save_shared
-        save_shared(
+        from utils.archive import save_standalone
+        save_standalone(
             stock_code=ts_code, stock_name=name, model_name=model_name,
-            username=username, analyses=analyses, moe_results=moe_results,
-            stock_info=info,
+            username=username, analyses=analyses,
+            moe_results=moe_results, stock_info=info,
         )
 
         _t_after = get_token_usage()["total"]

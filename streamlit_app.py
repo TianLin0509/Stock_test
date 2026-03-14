@@ -825,66 +825,67 @@ def main():
                 _show_stock_overview_basic()
                 st.markdown("---")
 
-                # 共享缓存检查（仅无分析结果时）
-                from utils.shared_cache import find_shared, load_shared
+                # 归档缓存检查（无分析结果时自动恢复 / 加载他人结果）
+                from utils.archive import find_recent, find_today_others, load_archive
                 if not analyses:
-                    shared_list = find_shared(
-                        st.session_state["stock_code"],
-                        exclude_user="",  # 不排除任何人，包括 auto_scheduler
-                    )
-                    if shared_list:
-                        # 自动加载 Top10 深度分析的结果（auto_scheduler）
-                        _auto_entry = next(
-                            (s for s in shared_list
-                             if s["username"] == "auto_scheduler" and s["has_moe"]),
-                            None,
-                        )
-                        if _auto_entry:
-                            shared_data = load_shared(_auto_entry["file_path"])
-                            if shared_data and shared_data.get("analyses"):
-                                st.session_state["analyses"] = shared_data["analyses"]
-                                if shared_data.get("moe_results"):
-                                    st.session_state["moe_results"] = shared_data["moe_results"]
-                                st.session_state["_shared_from"] = (
-                                    f"今日Top10深度分析 · {_auto_entry['model_name']}"
-                                )
-                                st.rerun()
+                    _stock_code = st.session_state["stock_code"]
+                    # 1) 自动恢复：查找最近24h内该股票的归档（含自己的）
+                    _recent = find_recent(_stock_code, max_hours=24)
+                    if _recent:
+                        _recent_data = load_archive(_recent["file"])
+                        if _recent_data and _recent_data.get("analyses"):
+                            st.session_state["analyses"] = _recent_data["analyses"]
+                            if _recent_data.get("moe_results"):
+                                st.session_state["moe_results"] = {
+                                    **_recent_data["moe_results"], "done": True,
+                                }
+                            _ts_short = _recent.get("ts", "")[11:16]
+                            _from_user = _recent.get("username", "")
+                            st.session_state["_shared_from"] = (
+                                f"{_from_user} · {_recent.get('model', '')} · {_ts_short}"
+                            )
+                            st.rerun()
 
-                        # 其他用户的共享缓存（手动加载）
-                        _other = [s for s in shared_list
-                                  if s["username"] != current_user]
-                        if _other:
-                            for sh in _other:
-                                ts_short = sh["timestamp"][11:16]
-                                keys_str = "、".join({
-                                    "expectation": "预期差", "trend": "趋势解读",
-                                    "fundamentals": "基本面", "sentiment": "舆情",
-                                    "sector": "板块", "holders": "股东",
-                                }.get(k, k) for k in sh["analyses_keys"])
-                                moe_tag = " + MoE辩论" if sh["has_moe"] else ""
-                                st.info(
-                                    f"📦 **{sh['username']}** 于 {ts_short} 已用 "
-                                    f"{sh['model_name']} 分析过此股票（{keys_str}{moe_tag}）"
-                                )
-                                if st.button(
-                                    f"📥 加载 {sh['username']} 的分析结果（免费）",
-                                    key=f"load_shared_{sh['username']}_{sh['model_name']}",
-                                ):
-                                    shared_data = load_shared(sh["file_path"])
-                                    if shared_data:
-                                        st.session_state["analyses"] = shared_data.get("analyses", {})
-                                        if shared_data.get("moe_results"):
-                                            st.session_state["moe_results"] = shared_data["moe_results"]
-                                        st.session_state["_shared_from"] = (
-                                            f"{sh['username']} · {sh['model_name']} · {ts_short}"
-                                        )
-                                        st.rerun()
-                            st.markdown("---")
+                    # 2) 今日其他用户的归档（手动加载）
+                    _others = find_today_others(_stock_code, exclude_user=current_user)
+                    if _others:
+                        for sh in _others:
+                            _ts_short = sh.get("ts", "")[11:16]
+                            _lbl_map = {
+                                "expectation": "预期差", "trend": "趋势解读",
+                                "fundamentals": "基本面", "sentiment": "舆情",
+                                "sector": "板块", "holders": "股东",
+                            }
+                            keys_str = "、".join(
+                                _lbl_map.get(k, k)
+                                for k in sh.get("analyses_done", [])
+                            )
+                            moe_tag = " + 六方会谈" if sh.get("has_moe") else ""
+                            st.info(
+                                f"📦 **{sh['username']}** 于 {_ts_short} 已用 "
+                                f"{sh.get('model', '')} 分析过此股票（{keys_str}{moe_tag}）"
+                            )
+                            if st.button(
+                                f"📥 加载 {sh['username']} 的分析结果（免费）",
+                                key=f"load_arch_{sh['username']}_{sh.get('model', '')}",
+                            ):
+                                _arch_data = load_archive(sh["file"])
+                                if _arch_data:
+                                    st.session_state["analyses"] = _arch_data.get("analyses", {})
+                                    if _arch_data.get("moe_results"):
+                                        st.session_state["moe_results"] = {
+                                            **_arch_data["moe_results"], "done": True,
+                                        }
+                                    st.session_state["_shared_from"] = (
+                                        f"{sh['username']} · {sh.get('model', '')} · {_ts_short}"
+                                    )
+                                    st.rerun()
+                        st.markdown("---")
 
-                # 共享来源标注
+                # 缓存来源标注
                 shared_from = st.session_state.get("_shared_from")
                 if shared_from and analyses:
-                    st.caption(f"📦 当前结果来自共享缓存：{shared_from}（可重新分析覆盖）")
+                    st.caption(f"📦 当前结果来自缓存：{shared_from}（可重新分析覆盖）")
 
                 if ai_err:
                     st.markdown(f"""<div class="status-banner warn">
@@ -1157,20 +1158,7 @@ def main():
                 save_archive(st.session_state)
             except Exception as e:
                 logger.debug("[poll] 归档失败: %s", e)
-            # 保存到共享缓存
-            try:
-                from utils.shared_cache import save_shared
-                save_shared(
-                    stock_code=st.session_state.get("stock_code", ""),
-                    stock_name=st.session_state.get("stock_name", ""),
-                    model_name=st.session_state.get("selected_model", ""),
-                    username=st.session_state.get("current_user", ""),
-                    analyses=st.session_state.get("analyses", {}),
-                    moe_results=st.session_state.get("moe_results"),
-                    stock_info=st.session_state.get("stock_info"),
-                )
-            except Exception as e:
-                logger.debug("[poll] 共享缓存保存失败: %s", e)
+            # （共享缓存已合并到 archive，无需额外保存）
 
         if _is_running_now:
             # 按钮刚触发时跳过 sleep，让 UI 立即刷新

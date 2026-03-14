@@ -253,3 +253,105 @@ def get_archive_stats() -> dict:
         "count": len(files),
         "size_mb": round(total_size / 1024 / 1024, 2),
     }
+
+
+# ── 缓存查询（替代 shared_cache）─────────────────────────────────────
+
+def find_recent(stock_code: str, max_hours: int = 24) -> dict | None:
+    """查找该股票最近一次归档（不限用户），返回索引条目或 None"""
+    if not INDEX_FILE.exists():
+        return None
+    cutoff = datetime.now().timestamp() - max_hours * 3600
+    best = None
+    for line in INDEX_FILE.read_text(encoding="utf-8").strip().split("\n"):
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if entry.get("stock_code") != stock_code:
+            continue
+        try:
+            ts = datetime.fromisoformat(entry["ts"]).timestamp()
+        except (ValueError, KeyError):
+            continue
+        if ts >= cutoff and (best is None or ts > best["_ts"]):
+            best = {**entry, "_ts": ts}
+    if best:
+        best.pop("_ts", None)
+    return best
+
+
+def find_today_others(stock_code: str, exclude_user: str = "") -> list[dict]:
+    """查找今日该股票其他用户的归档（用于亲友共享加载）"""
+    if not INDEX_FILE.exists():
+        return []
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    results = []
+    for line in INDEX_FILE.read_text(encoding="utf-8").strip().split("\n"):
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if entry.get("stock_code") != stock_code:
+            continue
+        if entry.get("date") != today_str:
+            continue
+        if exclude_user and entry.get("username") == exclude_user:
+            continue
+        results.append(entry)
+    results.sort(key=lambda x: x.get("ts", ""), reverse=True)
+    return results
+
+
+def save_standalone(stock_code: str, stock_name: str, model_name: str,
+                    username: str, analyses: dict,
+                    moe_results: dict = None, stock_info: dict = None):
+    """独立保存归档（不依赖 session_state，供 Top10 deep_runner 使用）"""
+    if not analyses:
+        return None
+    valid_keys = [k for k in ["expectation", "trend", "fundamentals",
+                               "sentiment", "sector", "holders"]
+                  if analyses.get(k) and _is_complete(k, analyses[k])]
+    if not valid_keys:
+        return None
+
+    now = datetime.now()
+    code6 = stock_code.split(".")[0] if "." in stock_code else stock_code
+    info = dict(stock_info) if stock_info else {}
+
+    moe_data = None
+    if moe_results and moe_results.get("done"):
+        ceo = moe_results.get("ceo", "")
+        if ceo and re.search(r"操作评级|强烈买入|买入|谨慎介入|持有观察|减持|回避", ceo):
+            moe_data = {"roles": dict(moe_results.get("roles", {})), "ceo": ceo}
+
+    record = {
+        "archive_ts": now.isoformat(timespec="seconds"),
+        "archive_date": now.strftime("%Y-%m-%d"),
+        "username": username,
+        "model": model_name,
+        "stock_code": stock_code,
+        "stock_name": stock_name,
+        "stock_info": info,
+        "price_snapshot": {},
+        "analyses": {k: analyses[k] for k in valid_keys},
+        "analyses_validated": valid_keys,
+        "moe_results": moe_data,
+    }
+
+    ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
+    filename = f"{now.strftime('%Y%m%d_%H%M%S')}_{code6}_{username}.json"
+    filepath = ARCHIVE_DIR / filename
+
+    with _lock:
+        filepath.write_text(
+            json.dumps(record, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        _append_index(filename, record, info, {}, valid_keys, moe_data)
+
+    return filename
