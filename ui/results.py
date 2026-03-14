@@ -327,7 +327,9 @@ def _render_free_question(client, cfg, model_name, name, tscode, info, analyses)
             st.write("🌐 联网搜索最新信息...")
             time.sleep(0.4)
             st.write("🤖 AI 正在思考并组织回答...")
-            result, err = call_ai(client, cfg, prompt, system=system, max_tokens=8000)
+            username = st.session_state.get("current_user", "")
+            result, err = call_ai(client, cfg, prompt, system=system, max_tokens=8000,
+                                  username=username)
 
             if err:
                 status.update(label="❌ 回答失败", state="error")

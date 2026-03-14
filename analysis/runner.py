@@ -80,28 +80,31 @@ def start_analysis(session_state, key: str, client, cfg, model_name: str):
     fund_hold = session_state.get("stock_fund_holdings", "")
     sector   = session_state.get("stock_sector_peers", "")
 
+    # 用户名（用于 token 归属）
+    username = session_state.get("current_user", "")
+
     # 选择对应的分析函数
     if key == "expectation":
         target = _run_expectation
-        args = (job, client, cfg, model_name, name, tscode, info)
+        args = (job, client, cfg, model_name, name, tscode, info, username)
     elif key == "trend":
         target = _run_trend
-        args = (job, client, cfg, model_name, name, tscode, df, cap, dragon, northbound, margin)
+        args = (job, client, cfg, model_name, name, tscode, df, cap, dragon, northbound, margin, username)
     elif key == "fundamentals":
         target = _run_fundamentals
-        args = (job, client, cfg, model_name, name, tscode, info, fin)
+        args = (job, client, cfg, model_name, name, tscode, info, fin, username)
     elif key == "sentiment":
         target = _run_sentiment
-        args = (job, client, cfg, model_name, name, tscode, info)
+        args = (job, client, cfg, model_name, name, tscode, info, username)
     elif key == "sector":
         target = _run_sector
-        args = (job, client, cfg, model_name, name, tscode, info, sector)
+        args = (job, client, cfg, model_name, name, tscode, info, sector, username)
     elif key == "holders":
         target = _run_holders
-        args = (job, client, cfg, model_name, name, tscode, info, holders, pledge, fund_hold)
+        args = (job, client, cfg, model_name, name, tscode, info, holders, pledge, fund_hold, username)
     elif key == "moe":
         target = _run_moe
-        args = (job, client, cfg, model_name, name, tscode, analyses)
+        args = (job, client, cfg, model_name, name, tscode, analyses, username)
     else:
         return
 
@@ -133,7 +136,7 @@ def collect_result(session_state, key: str):
 # 各分析任务（在后台线程中执行，不能用 st.* 函数）
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _run_expectation(job, client, cfg, model_name, name, tscode, info):
+def _run_expectation(job, client, cfg, model_name, name, tscode, info, username=""):
     try:
         _log(job, f"📡 正在连接 {model_name}...")
         time.sleep(0.6)
@@ -143,7 +146,7 @@ def _run_expectation(job, client, cfg, model_name, name, tscode, info):
         p, s = build_expectation_prompt(name, tscode, info)
         time.sleep(0.4)
         _log(job, "🤖 AI 正在深度分析预期差，通常需要 15~30 秒...")
-        result, err = call_ai(client, cfg, p, system=s, max_tokens=8000)
+        result, err = call_ai(client, cfg, p, system=s, max_tokens=8000, username=username)
         if err:
             _log(job, f"❌ 预期差分析失败：{err}")
             job["result"] = f"⚠️ 预期差分析失败：{err}"
@@ -162,7 +165,7 @@ def _run_expectation(job, client, cfg, model_name, name, tscode, info):
 
 
 def _run_trend(job, client, cfg, model_name, name, tscode, df, cap, dragon,
-               northbound="", margin=""):
+               northbound="", margin="", username=""):
     try:
         _log(job, f"📡 正在连接 {model_name}...")
         time.sleep(0.6)
@@ -186,7 +189,7 @@ def _run_trend(job, client, cfg, model_name, name, tscode, df, cap, dragon,
                                   northbound, margin)
         time.sleep(0.4)
         _log(job, "🤖 AI 正在研判趋势走向，通常需要 15~30 秒...")
-        result, err = call_ai(client, cfg, p, system=s, max_tokens=8000)
+        result, err = call_ai(client, cfg, p, system=s, max_tokens=8000, username=username)
         if err:
             _log(job, f"❌ 趋势研判失败：{err}")
             job["result"] = f"⚠️ 趋势研判失败：{err}"
@@ -204,7 +207,7 @@ def _run_trend(job, client, cfg, model_name, name, tscode, df, cap, dragon,
         job["status"] = "done"
 
 
-def _run_fundamentals(job, client, cfg, model_name, name, tscode, info, fin):
+def _run_fundamentals(job, client, cfg, model_name, name, tscode, info, fin, username=""):
     try:
         _log(job, f"📡 正在连接 {model_name}...")
         time.sleep(0.6)
@@ -216,7 +219,7 @@ def _run_fundamentals(job, client, cfg, model_name, name, tscode, info, fin):
         p, s = build_fundamentals_prompt(name, tscode, info, fin)
         time.sleep(0.4)
         _log(job, "🤖 AI 正在深度剖析基本面，通常需要 15~30 秒...")
-        result, err = call_ai(client, cfg, p, system=s, max_tokens=8000)
+        result, err = call_ai(client, cfg, p, system=s, max_tokens=8000, username=username)
         if err:
             _log(job, f"❌ 基本面剖析失败：{err}")
             job["result"] = f"⚠️ 基本面剖析失败：{err}"
@@ -234,7 +237,7 @@ def _run_fundamentals(job, client, cfg, model_name, name, tscode, info, fin):
         job["status"] = "done"
 
 
-def _run_moe(job, client, cfg, model_name, name, tscode, analyses):
+def _run_moe(job, client, cfg, model_name, name, tscode, analyses, username=""):
     from analysis.moe import MOE_ROLES, CEO_SYSTEM
     code6 = to_code6(tscode)
 
@@ -266,7 +269,8 @@ def _run_moe(job, client, cfg, model_name, name, tscode, analyses):
 
 保持角色特色和语言风格。"""
             text, err = call_ai(client, cfg, prompt,
-                                system=role["system"], max_tokens=800)
+                                system=role["system"], max_tokens=800,
+                                username=username)
             if err:
                 text = f"⚠️ 该角色分析失败：{err}"
             role_results[role["key"]] = text
@@ -321,7 +325,8 @@ def _run_moe(job, client, cfg, model_name, name, tscode, analyses):
 **策略有效期：** ___个交易日，若___则策略失效。"""
 
         ceo_text, ceo_err = call_ai(client, cfg, ceo_prompt,
-                                     system=CEO_SYSTEM, max_tokens=2000)
+                                     system=CEO_SYSTEM, max_tokens=2000,
+                                     username=username)
         if ceo_err:
             ceo_text = f"⚠️ CEO裁决生成失败：{ceo_err}\n\n建议切换其他模型后重新尝试。"
 
@@ -336,7 +341,7 @@ def _run_moe(job, client, cfg, model_name, name, tscode, analyses):
         job["status"] = "done"
 
 
-def _run_sentiment(job, client, cfg, model_name, name, tscode, info):
+def _run_sentiment(job, client, cfg, model_name, name, tscode, info, username=""):
     try:
         _log(job, f"📡 正在连接 {model_name}...")
         time.sleep(0.6)
@@ -350,7 +355,7 @@ def _run_sentiment(job, client, cfg, model_name, name, tscode, info):
         p, s = build_sentiment_prompt(name, tscode, info)
         time.sleep(0.4)
         _log(job, "🤖 AI 正在分析舆情情绪，通常需要 20~40 秒...")
-        result, err = call_ai(client, cfg, p, system=s, max_tokens=8000)
+        result, err = call_ai(client, cfg, p, system=s, max_tokens=8000, username=username)
         if err:
             _log(job, f"❌ 舆情分析失败：{err}")
             job["result"] = f"⚠️ 舆情分析失败：{err}"
@@ -368,7 +373,7 @@ def _run_sentiment(job, client, cfg, model_name, name, tscode, info):
         job["status"] = "done"
 
 
-def _run_sector(job, client, cfg, model_name, name, tscode, info, sector_data):
+def _run_sector(job, client, cfg, model_name, name, tscode, info, sector_data, username=""):
     try:
         _log(job, f"📡 正在连接 {model_name}...")
         time.sleep(0.6)
@@ -381,7 +386,7 @@ def _run_sector(job, client, cfg, model_name, name, tscode, info, sector_data):
         p, s = build_sector_prompt(name, tscode, info, sector_data)
         time.sleep(0.4)
         _log(job, "🤖 AI 正在进行板块联动分析，通常需要 15~30 秒...")
-        result, err = call_ai(client, cfg, p, system=s, max_tokens=8000)
+        result, err = call_ai(client, cfg, p, system=s, max_tokens=8000, username=username)
         if err:
             _log(job, f"❌ 板块分析失败：{err}")
             job["result"] = f"⚠️ 板块分析失败：{err}"
@@ -400,7 +405,7 @@ def _run_sector(job, client, cfg, model_name, name, tscode, info, sector_data):
 
 
 def _run_holders(job, client, cfg, model_name, name, tscode, info,
-                 holders_data, pledge_data, fund_data):
+                 holders_data, pledge_data, fund_data, username=""):
     try:
         _log(job, f"📡 正在连接 {model_name}...")
         time.sleep(0.6)
@@ -415,7 +420,7 @@ def _run_holders(job, client, cfg, model_name, name, tscode, info,
                                      pledge_data, fund_data)
         time.sleep(0.4)
         _log(job, "🤖 AI 正在分析股东动向，通常需要 15~30 秒...")
-        result, err = call_ai(client, cfg, p, system=s, max_tokens=8000)
+        result, err = call_ai(client, cfg, p, system=s, max_tokens=8000, username=username)
         if err:
             _log(job, f"❌ 股东分析失败：{err}")
             job["result"] = f"⚠️ 股东分析失败：{err}"

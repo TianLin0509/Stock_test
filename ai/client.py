@@ -14,12 +14,20 @@ _token_lock = threading.Lock()
 _token_usage = {"prompt": 0, "completion": 0, "total": 0}
 
 
-def add_tokens(prompt_tokens: int = 0, completion_tokens: int = 0, total_tokens: int = 0):
-    """累加 token 用量"""
+def add_tokens(prompt_tokens: int = 0, completion_tokens: int = 0,
+               total_tokens: int = 0, username: str = ""):
+    """累加 token 用量（全局 + 用户级持久化）"""
+    effective_total = total_tokens or (prompt_tokens + completion_tokens)
     with _token_lock:
         _token_usage["prompt"] += prompt_tokens
         _token_usage["completion"] += completion_tokens
-        _token_usage["total"] += total_tokens or (prompt_tokens + completion_tokens)
+        _token_usage["total"] += effective_total
+    if username:
+        try:
+            from utils.user_store import add_user_tokens
+            add_user_tokens(username, prompt_tokens, completion_tokens, effective_total)
+        except Exception:
+            pass
 
 
 def get_token_usage() -> dict:
@@ -84,10 +92,12 @@ def _build_extra(cfg: dict) -> dict:
 
 
 def call_ai(client: OpenAI, cfg: dict, prompt: str,
-            system: str = "", max_tokens: int = 8000) -> tuple[str, str | None]:
+            system: str = "", max_tokens: int = 8000,
+            username: str = "") -> tuple[str, str | None]:
     """
     调用 AI 模型，返回 (text, error_msg)。
     豆包走 responses API，其他走 chat.completions。
+    username 用于 per-user token 持久化。
     """
     messages = _build_messages(prompt, system)
 
@@ -97,7 +107,7 @@ def call_ai(client: OpenAI, cfg: dict, prompt: str,
         if not err:
             # 豆包按字符粗估 token（1 中文字 ≈ 2 token）
             est = len(prompt) + len(text)
-            add_tokens(total_tokens=est)
+            add_tokens(total_tokens=est, username=username)
         return text, err
 
     extra = _build_extra(cfg)
@@ -116,6 +126,7 @@ def call_ai(client: OpenAI, cfg: dict, prompt: str,
                 prompt_tokens=resp.usage.prompt_tokens or 0,
                 completion_tokens=resp.usage.completion_tokens or 0,
                 total_tokens=resp.usage.total_tokens or 0,
+                username=username,
             )
 
         return text, None

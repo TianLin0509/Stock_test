@@ -44,7 +44,91 @@ from analysis.runner import (
 inject_css()
 
 
+def _show_login():
+    """显示登录页面"""
+    import re
+    st.markdown("""
+<div class="app-header">
+  <h1>📈 呆瓜方后援会专属投研助手</h1>
+  <p>预期差挖掘 · K线趋势研判 · 基本面剖析 · MoE多角色辩论裁决</p>
+  <p style="font-size: 0.8em;"><span style="color: white; font-weight: bold;">立花道雪</span></p>
+</div>
+""", unsafe_allow_html=True)
+
+    _, col_center, _ = st.columns([1, 2, 1])
+    with col_center:
+        st.markdown("#### 👤 请输入用户名登录")
+        username = st.text_input(
+            "用户名", placeholder="例如：alice、张三",
+            key="_login_username", label_visibility="collapsed",
+        )
+        if st.button("🚀 登录", type="primary", use_container_width=True):
+            name = username.strip()
+            if not name or len(name) < 1 or len(name) > 10:
+                st.warning("用户名长度 1-10 个字符")
+                return
+            if not re.match(r'^[\w\u4e00-\u9fff]+$', name):
+                st.warning("仅支持字母、数字、下划线或中文")
+                return
+            # 加载/创建用户数据
+            from utils.user_store import load_user, save_user
+            user_data = load_user(name)
+            from datetime import datetime
+            user_data["last_login"] = datetime.now().isoformat(timespec="seconds")
+            save_user(user_data)
+            # 记录累计token基数（登录时加载）
+            st.session_state["current_user"] = name
+            st.session_state["_user_base_tokens"] = user_data["token_usage"]["total"]
+            st.rerun()
+        st.caption("无需注册，输入用户名即可使用。数据将按用户名保存。")
+
+
+def _save_analysis_to_history():
+    """保存当前分析到用户历史（查询新股票前调用）"""
+    username = st.session_state.get("current_user", "")
+    stock_name = st.session_state.get("stock_name", "")
+    stock_code = st.session_state.get("stock_code", "")
+    if not username or not stock_name:
+        return
+
+    analyses = st.session_state.get("analyses", {})
+    done_keys = [k for k in ["expectation", "trend", "fundamentals",
+                              "sentiment", "sector", "holders"] if analyses.get(k)]
+    if not done_keys:
+        return
+
+    # 生成摘要：每个分析取前80字
+    parts = []
+    label_map = {"expectation": "预期差", "trend": "趋势", "fundamentals": "基本面",
+                 "sentiment": "舆情", "sector": "板块", "holders": "股东"}
+    for k in done_keys:
+        text = analyses[k][:80].replace("\n", " ").strip()
+        parts.append(f"{label_map.get(k, k)}: {text}")
+    summary = " | ".join(parts)[:300]
+
+    # Token消耗估算（本次session增量）
+    session_tokens = get_token_usage()["total"]
+
+    from utils.user_store import add_history_entry
+    add_history_entry(
+        username=username,
+        stock_code=stock_code,
+        stock_name=stock_name,
+        model=st.session_state.get("selected_model", ""),
+        analyses_done=done_keys,
+        token_cost=session_tokens,
+        summary=summary,
+    )
+
+
 def main():
+    # ── 登录门 ─────────────────────────────────────────────────────────
+    if "current_user" not in st.session_state:
+        _show_login()
+        return
+
+    current_user = st.session_state["current_user"]
+
     # ── Header ────────────────────────────────────────────────────────────
     st.markdown("""
 <div class="app-header">
@@ -54,9 +138,11 @@ def main():
 </div>
 """, unsafe_allow_html=True)
 
-    # ── Token 用量显示（右上角） ──────────────────────────────────────────
+    # ── Token 用量显示（右上角，含用户名） ─────────────────────────────
     usage = get_token_usage()
-    total = usage["total"]
+    session_tokens = usage["total"]
+    user_base = st.session_state.get("_user_base_tokens", 0)
+    total = user_base + session_tokens
     if total > 0:
         if total >= 10000:
             display = f"{total / 10000:.1f}万"
@@ -68,10 +154,18 @@ def main():
             padding: 4px 14px; border-radius: 20px;
             font-size: 0.78em; font-weight: 600;
             backdrop-filter: blur(8px); box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-        ">🪙 Token: {display}</div>""", unsafe_allow_html=True)
+        ">👤 {current_user} &nbsp;|&nbsp; 🪙 {display}</div>""", unsafe_allow_html=True)
 
     # ── Sidebar ───────────────────────────────────────────────────────────
     with st.sidebar:
+        st.markdown(f"**👤 {current_user}**")
+        if st.button("🔄 切换用户", key="logout_btn"):
+            _save_analysis_to_history()
+            for k in list(st.session_state.keys()):
+                del st.session_state[k]
+            st.rerun()
+
+        st.markdown("---")
         st.markdown("### 🤖 选择分析模型")
         selected_model = st.selectbox(
             "当前模型", options=MODEL_NAMES, index=2,
@@ -134,6 +228,22 @@ def main():
         except Exception:
             st.caption("📧 邮件模块未加载")
             email_addr = ""
+
+        st.markdown("---")
+        st.markdown("### 📜 分析历史")
+        from utils.user_store import load_user
+        _udata = load_user(current_user)
+        _hist = _udata.get("history", [])
+        if _hist:
+            for _entry in reversed(_hist[-10:]):
+                _date = _entry.get("ts", "")[:10]
+                _sname = _entry.get("stock_name", "")
+                _adone = _entry.get("analyses_done", [])
+                _tcost = _entry.get("token_cost", 0)
+                _tdisp = f"{_tcost/10000:.1f}万" if _tcost >= 10000 else f"{_tcost:,}"
+                st.caption(f"{_date} · **{_sname}** ({len(_adone)}项) · {_tdisp} tokens")
+        else:
+            st.caption("暂无分析记录")
 
         st.markdown("---")
         st.markdown("""
@@ -222,6 +332,9 @@ def main():
     # 查询股票逻辑
     # ══════════════════════════════════════════════════════════════════════
     if search_btn and query:
+        # 保存上一轮分析到历史
+        _save_analysis_to_history()
+
         for k in ["analyses", "moe_results", "stock_fin", "stock_cap",
                    "stock_dragon", "stock_northbound", "stock_margin",
                    "valuation_df", "stock_sector_peers", "stock_holders",
@@ -548,7 +661,8 @@ def _show_mystic(client, cfg, model_name):
             "古典与现代混搭。请联网搜索今天的真实黄历数据来增强可信度。"
         )
 
-        result, err = call_ai(client, cfg, prompt, system=system, max_tokens=4000)
+        result, err = call_ai(client, cfg, prompt, system=system, max_tokens=4000,
+                              username=st.session_state.get("current_user", ""))
 
         if err:
             status.update(label="❌ 卦象推演失败", state="error")

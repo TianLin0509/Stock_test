@@ -13,3 +13,6 @@ __pycache__/
 
 # Large data files (单个大文件排除，拆分的 part 文件允许上传)
 data/history/all_daily.parquet
+
+# User data (JSON persistence, not for git)
+user_data/*.json
