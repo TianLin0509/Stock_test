@@ -37,6 +37,14 @@ def inject_css():
 /* 禁用 Streamlit rerun 时旧内容的半透明残影效果 */
 [data-stale="true"] { opacity: 1 !important; }
 
+/* Spinner 文字：不换行，省略号截断 */
+.stSpinner > div {
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  font-size: 0.82rem !important;
+}
+
 html, body, [data-testid="stAppViewContainer"] {
   background: var(--bg) !important;
   font-family: 'Noto Sans SC', 'PingFang SC', sans-serif;

@@ -183,7 +183,9 @@ def collect_result(session_state, key: str):
 def _run_generic(job, client, cfg, model_name, label, build_fn, build_args, username=""):
     """通用分析流程：构建 prompt → 流式调用 AI → 逐块累积结果
     job["partial_result"] 实时更新，前端每次 rerun 可展示已生成的内容。
+    流式开始前显示心跳消息，流式开始后心跳自动停止。
     """
+    import time as _time
     from ai.client import call_ai_stream, add_tokens
 
     try:
@@ -191,17 +193,42 @@ def _run_generic(job, client, cfg, model_name, label, build_fn, build_args, user
         p, s = build_fn(*build_args)
         _log(job, f"🤖 AI 正在进行{label}...")
 
+        # 心跳：在流式第一个 chunk 到达前显示等待提示
+        _first_chunk = threading.Event()
+        _tips = [
+            "正在联网搜索最新资讯…",
+            "正在整理分析数据…",
+            "正在等待 AI 响应…",
+            "AI 正在思考中…",
+            "即将开始输出…",
+        ]
+
+        def _heartbeat():
+            elapsed = 0
+            idx = 0
+            while not _first_chunk.wait(timeout=4):
+                elapsed += 4
+                tip = _tips[min(idx, len(_tips) - 1)]
+                _log(job, f"⏱️ 已等待 {elapsed}s — {tip}")
+                idx += 1
+
+        hb = threading.Thread(target=_heartbeat, daemon=True)
+        hb.start()
+
         # 流式调用，逐块累积到 partial_result
         job["partial_result"] = ""
         full_text = ""
         has_error = False
 
         for chunk in call_ai_stream(client, cfg, p, system=s, max_tokens=8000):
+            if not _first_chunk.is_set():
+                _first_chunk.set()  # 停止心跳
             full_text += chunk
             job["partial_result"] = full_text
-            # 检查是否为错误消息
             if chunk.startswith("\n\n⚠️"):
                 has_error = True
+
+        _first_chunk.set()  # 确保心跳停止
 
         # 流式完成后估算 token 用量
         if not has_error:
