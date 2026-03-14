@@ -603,6 +603,7 @@ def main():
     # 获取 AI 客户端（各 Tab 共用）
     # ══════════════════════════════════════════════════════════════════════
     stock_ready = bool(st.session_state.get("stock_name"))
+    analyses = st.session_state.get("analyses", {})
     client, cfg_now, ai_err = get_ai_client(selected_model)
     core_keys = ["expectation", "trend", "fundamentals"]
 

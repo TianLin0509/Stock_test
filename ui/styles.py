@@ -79,16 +79,32 @@ def inject_css():
   min-height: unset !important;
   white-space: nowrap !important;
 }
+/* 一键分析按钮：清新蓝绿渐变 */
+[data-testid="stHorizontalBlock"]:has(.stTextInput) .stButton button[kind="primary"] {
+  background: linear-gradient(135deg, #3b82f6 0%, #06b6d4 100%) !important;
+  border: none !important;
+  color: #fff !important;
+  font-weight: 700 !important;
+  box-shadow: 0 3px 12px rgba(59, 130, 246, 0.3) !important;
+  transition: all 0.2s ease !important;
+}
+[data-testid="stHorizontalBlock"]:has(.stTextInput) .stButton button[kind="primary"]:hover {
+  transform: translateY(-1px) !important;
+  box-shadow: 0 5px 18px rgba(59, 130, 246, 0.4) !important;
+}
+/* 重置按钮：轻量描边风格 */
 [data-testid="stHorizontalBlock"]:has(.stTextInput) .stButton button:not([kind="primary"]) {
-  background: var(--bg-soft) !important;
-  border: 1px solid var(--border) !important;
-  color: var(--text-mid) !important;
+  background: var(--bg-card) !important;
+  border: 1.5px solid #e2e8f0 !important;
+  color: #64748b !important;
   box-shadow: none !important;
+  font-weight: 600 !important;
+  transition: all 0.2s ease !important;
 }
 [data-testid="stHorizontalBlock"]:has(.stTextInput) .stButton button:not([kind="primary"]):hover {
-  background: var(--bg-card) !important;
-  color: var(--text) !important;
-  border-color: var(--blue) !important;
+  background: #f8fafc !important;
+  color: #334155 !important;
+  border-color: #94a3b8 !important;
 }
 
 html, body, [data-testid="stAppViewContainer"] {
@@ -242,13 +258,13 @@ html, body, [data-testid="stAppViewContainer"] {
   padding: 0.5rem 1.4rem !important;
 }
 .stButton button[kind="primary"] {
-  background: linear-gradient(135deg, var(--blue), var(--purple)) !important;
+  background: linear-gradient(135deg, #3b82f6 0%, #06b6d4 100%) !important;
   border: none !important; color: #fff !important;
-  box-shadow: 0 4px 14px rgba(99,102,241,0.3) !important;
+  box-shadow: 0 3px 12px rgba(59,130,246,0.3) !important;
 }
 .stButton button[kind="primary"]:hover {
   transform: translateY(-1px) !important;
-  box-shadow: 0 6px 20px rgba(99,102,241,0.4) !important;
+  box-shadow: 0 5px 18px rgba(59,130,246,0.4) !important;
 }
 
 /* 操作按钮行：紧凑 Tab 风格，与上方 Tab 栏呼应 */
