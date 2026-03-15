@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-📈 呆瓜方后援会专属投研助手 v5.0
+📈 呆瓜方后援会专属投研助手 v6.0
 Multi-Model + Tushare · 模块化架构
 """
 
@@ -35,7 +35,7 @@ import streamlit as st
 
 # ── Page Config ──────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="呆瓜方后援会专属投研助手 v5.0 🌸",
+    page_title="呆瓜方后援会专属投研助手 v6.0 🌸",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="auto",
@@ -74,9 +74,8 @@ def _show_login():
     import re
     st.markdown("""
 <div class="app-header">
-  <h1>📈 呆瓜方后援会专属投研助手</h1>
+  <h1>📈 呆瓜方后援会专属投研助手 v6.0</h1>
   <p>预期差挖掘 · K线趋势研判 · 基本面剖析 · MoE多角色辩论裁决</p>
-  <p style="font-size: 0.8em;"><span style="color: white; font-weight: bold;">立花道雪</span></p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -196,9 +195,8 @@ def main():
     if not _upper_collapsed:
         st.markdown("""
 <div class="app-header">
-  <h1>📈 呆瓜方后援会专属投研助手</h1>
+  <h1>📈 呆瓜方后援会专属投研助手 v6.0</h1>
   <p>预期差挖掘 · K线趋势研判 · 基本面剖析 · MoE多角色辩论裁决</p>
-  <p style="font-size: 0.8em;"><span style="color: white; font-weight: bold;">立花道雪</span></p>
 </div>
 """, unsafe_allow_html=True)
 
