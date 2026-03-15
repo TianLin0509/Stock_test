@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-📈 呆瓜方后援会专属投研助手 v6.04
+📈 呆瓜方后援会专属投研助手 v6.05
 Multi-Model + Tushare · 模块化架构
 """
 
@@ -35,7 +35,7 @@ import streamlit as st
 
 # ── Page Config ──────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="呆瓜方后援会专属投研助手 v6.04 🌸",
+    page_title="呆瓜方后援会专属投研助手 v6.05 🌸",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="auto",
@@ -74,7 +74,7 @@ def _show_login():
     import re
     st.markdown("""
 <div class="app-header">
-  <h1>📈 呆瓜方后援会专属投研助手 v6.04</h1>
+  <h1>📈 呆瓜方后援会专属投研助手 v6.05</h1>
   <p>预期差挖掘 · K线趋势研判 · 基本面剖析 · MoE多角色辩论裁决</p>
 </div>
 """, unsafe_allow_html=True)
@@ -195,7 +195,7 @@ def main():
     if not _upper_collapsed:
         st.markdown("""
 <div class="app-header">
-  <h1>📈 呆瓜方后援会专属投研助手 v6.04</h1>
+  <h1>📈 呆瓜方后援会专属投研助手 v6.05</h1>
   <p>预期差挖掘 · K线趋势研判 · 基本面剖析 · MoE多角色辩论裁决</p>
 </div>
 """, unsafe_allow_html=True)
@@ -406,10 +406,13 @@ def main():
                 from data.tushare_client import load_stock_list
                 _sl_df, _ = load_stock_list()
                 if not _sl_df.empty:
-                    _opts = [
-                        f"{str(row.get('symbol', row.get('ts_code', '').split('.')[0])).zfill(6)} {row.get('name', '')}"
-                        for _, row in _sl_df.iterrows()
-                    ]
+                    # 向量化构建，比 iterrows 快 50-100x
+                    if "symbol" in _sl_df.columns:
+                        _codes = _sl_df["symbol"].astype(str).str.zfill(6)
+                    else:
+                        _codes = _sl_df["ts_code"].astype(str).str.split(".").str[0].str.zfill(6)
+                    _names = _sl_df.get("name", "").astype(str)
+                    _opts = (_codes + " " + _names).tolist()
                     st.session_state["_stock_options"] = sorted(_opts)
                 else:
                     st.session_state["_stock_options"] = []

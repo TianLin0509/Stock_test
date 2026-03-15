@@ -21,7 +21,6 @@ TUSHARE_URL   = st.secrets.get("TUSHARE_URL", "http://lianghua.nanyangqiankun.to
 
 def _init_tushare():
     try:
-        import time as _time
         import requests as _req
 
         ts.set_token(TUSHARE_TOKEN)
@@ -29,22 +28,21 @@ def _init_tushare():
         p._DataApi__token = TUSHARE_TOKEN
         p._DataApi__http_url = TUSHARE_URL
 
-        # 增大 tushare 底层 requests 超时（云端跨境访问可能较慢）
+        # 缩短超时，避免阻塞首屏加载
         _orig_post = _req.post
         def _patched_post(*a, **kw):
-            kw.setdefault("timeout", 30)
+            kw.setdefault("timeout", 10)
             return _orig_post(*a, **kw)
         _req.post = _patched_post
 
-        for attempt in range(1, 6):
-            try:
-                test = p.trade_cal(exchange="SSE", start_date="20240101", end_date="20240103")
-                if test is not None and not test.empty:
-                    return p, None
-            except Exception as e:
-                if attempt < 5:
-                    _time.sleep(3)
-        return None, "Tushare 接口返回空，请检查 Token 或网络"
+        # 快速探测：只试 1 次，超时即走 fallback（有三层兜底不怕）
+        try:
+            test = p.trade_cal(exchange="SSE", start_date="20240101", end_date="20240103")
+            if test is not None and not test.empty:
+                return p, None
+        except Exception:
+            pass
+        return None, "Tushare 接口返回空，已自动切换备用数据源"
     except Exception as e:
         return None, f"Tushare 初始化失败：{e}"
 
