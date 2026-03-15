@@ -4,14 +4,14 @@
   "last_login": "2026-03-15T16:53:01",
   "preferences": {},
   "token_usage": {
-    "total": 73957,
+    "total": 81881,
     "prompt": 0,
     "completion": 0,
     "daily": {
       "2026-03-15": {
         "prompt": 0,
         "completion": 0,
-        "total": 44048
+        "total": 51972
       },
       "2026-03-16": {
         "prompt": 0,
