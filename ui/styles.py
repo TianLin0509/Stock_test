@@ -43,8 +43,8 @@ def inject_css():
   --radius-sm: 10px;
 }
 
-/* 禁用 Streamlit rerun 时旧内容的半透明残影效果 */
-[data-stale="true"] { opacity: 1 !important; }
+/* Streamlit rerun 时旧内容淡出（避免与新内容重叠造成"双重渲染"假象） */
+[data-stale="true"] { opacity: 0.4 !important; transition: opacity 0.3s; }
 
 /* Spinner 文字：不换行，省略号截断 */
 .stSpinner > div {
