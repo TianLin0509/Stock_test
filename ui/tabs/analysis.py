@@ -134,16 +134,28 @@ _HEARTBEAT_TIPS = [
 ]
 
 
-def _run_parallel_with_heartbeat(keys, client, cfg_now, selected_model,
-                                  status_label, label_map, analyses):
-    """并行执行多项分析，主线程轮询 + 心跳进度输出"""
-    from concurrent.futures import ThreadPoolExecutor, as_completed, FIRST_COMPLETED, wait
+def _start_bg_analysis(keys, client, cfg_now, selected_model, label_map):
+    """在后台线程中启动并行分析，结果写入 session_state。
+    主线程通过轮询 _bg_analysis 状态来刷新 UI。
+    """
+    import threading
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
     name, tscode, info, fin, df, username = _extract_session_data()
+    analyses = st.session_state.get("analyses", {})
 
-    with st.status(f"⏳ {status_label}...", expanded=True) as status:
-        st.write(f"📡 并行启动 {len(keys)} 项分析（{selected_model}）...")
+    # 后台状态对象（挂在 session_state 上，主线程可读）
+    bg = {
+        "keys": list(keys),
+        "label_map": dict(label_map),
+        "total": len(keys),
+        "done_keys": [],       # 已完成的 key
+        "errors": {},          # key → error msg
+        "finished": False,     # 全部完成标志
+    }
+    st.session_state["_bg_analysis"] = bg
 
+    def _worker():
         with ThreadPoolExecutor(max_workers=3) as pool:
             futures = {
                 pool.submit(
@@ -151,63 +163,99 @@ def _run_parallel_with_heartbeat(keys, client, cfg_now, selected_model,
                     name, tscode, info, fin, df, username
                 ): k for k in keys
             }
-            pending = set(futures.keys())
-            elapsed = 0
-            tip_idx = 0
-
-            done_count = 0
-            total = len(keys)
-
-            while pending:
-                # 等待最多 4 秒，看有没有任务完成
-                done, pending = wait(pending, timeout=4, return_when=FIRST_COMPLETED)
-
-                if done:
-                    for fut in done:
-                        k = futures[fut]
-                        result, err, extra = fut.result()
-                        if not err and result:
-                            analyses[k] = result
-                            st.session_state["analyses"] = analyses
-                            _store_extra_data(extra)
-                        done_count += 1
-                        _lbl = label_map.get(k, k)
-                        if err:
-                            st.write(f"❌ {_lbl} 失败")
-                        elif pending:
-                            st.write(f"✅ **{_lbl}** 完成（{done_count}/{total}）"
-                                     f"— 分析结束后可点击按钮查看")
-                        else:
-                            st.write(f"✅ **{_lbl}** 完成（{done_count}/{total}）")
+            for fut in as_completed(futures):
+                k = futures[fut]
+                result, err, extra = fut.result()
+                if not err and result:
+                    analyses[k] = result
+                    st.session_state["analyses"] = analyses
+                    if extra:
+                        # 资金数据存入 session_state（线程安全：Streamlit dict 是普通 dict）
+                        cap = extra.get("capital_flow")
+                        if cap is not None:
+                            import pandas as _pd
+                            if isinstance(cap, _pd.DataFrame) and not cap.empty:
+                                st.session_state["capital_flow_df"] = cap
+                            elif isinstance(cap, str) and len(cap) > 20:
+                                st.session_state["stock_capital"] = cap
+                        nb = extra.get("northbound")
+                        if nb and isinstance(nb, str) and "暂无" not in nb:
+                            st.session_state["stock_northbound"] = nb
+                        margin = extra.get("margin")
+                        if margin and isinstance(margin, str) and "暂无" not in margin:
+                            st.session_state["stock_margin"] = margin
+                    bg["done_keys"].append(k)
                 else:
-                    # 4 秒内无任务完成 → 输出心跳
-                    elapsed += 4
-                    tip = _HEARTBEAT_TIPS[min(tip_idx, len(_HEARTBEAT_TIPS) - 1)]
-                    st.write(f"⏱️ 已等待 {elapsed}s — {tip}")
-                    tip_idx += 1
+                    bg["errors"][k] = err or "未知错误"
+                    bg["done_keys"].append(k)
+        bg["finished"] = True
 
-        status.update(label=f"✅ {status_label}完成！点击上方按钮查看结果", state="complete")
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+
+
+def _poll_bg_analysis():
+    """检查后台分析状态，渲染进度条，完成时清理。
+    返回 True 如果仍在运行（需要继续轮询）。
+    """
+    import time
+    bg = st.session_state.get("_bg_analysis")
+    if not bg:
+        return False
+
+    label_map = bg["label_map"]
+    total = bg["total"]
+    done_keys = bg["done_keys"]
+    errors = bg["errors"]
+    done_count = len(done_keys)
+
+    if bg["finished"]:
+        # 全部完成 → 显示完成状态，清理
+        with st.status(f"✅ 分析完成！点击上方按钮查看结果", expanded=False, state="complete") as status:
+            for k in done_keys:
+                _lbl = label_map.get(k, k)
+                if k in errors:
+                    st.write(f"❌ {_lbl} 失败：{errors[k]}")
+                else:
+                    st.write(f"✅ {_lbl} 完成")
+        st.session_state.pop("_bg_analysis", None)
+        # 深度分析完成时设置 auto_sim
+        if any(k in ("sentiment", "sector", "holders") for k in bg["keys"]):
+            st.session_state["_auto_sim"] = True
+        return False
+
+    # 仍在运行 → 显示进度 + 心跳
+    _remaining = [label_map.get(k, k) for k in bg["keys"] if k not in done_keys]
+    with st.status(f"⏳ 分析中（{done_count}/{total}）...", expanded=True, state="running") as status:
+        for k in done_keys:
+            _lbl = label_map.get(k, k)
+            if k in errors:
+                st.write(f"❌ {_lbl} 失败")
+            else:
+                st.write(f"✅ **{_lbl}** 完成")
+        if _remaining:
+            tip_idx = st.session_state.get("_bg_tip_idx", 0)
+            tip = _HEARTBEAT_TIPS[min(tip_idx, len(_HEARTBEAT_TIPS) - 1)]
+            st.write(f"⏱️ 等待中 — {tip}（剩余：{'、'.join(_remaining)}）")
+            st.session_state["_bg_tip_idx"] = tip_idx + 1
+
+    time.sleep(4)
+    st.rerun()
+    return True  # 不会到达这里，rerun 会中断
 
 
 def _run_single_analysis(key, label, client, cfg_now, selected_model, analyses):
-    """同步执行单个分析并更新 session_state，带心跳"""
-    _run_parallel_with_heartbeat(
-        [key], client, cfg_now, selected_model,
-        label, {key: label}, analyses,
-    )
+    """启动单项后台分析"""
+    _start_bg_analysis([key], client, cfg_now, selected_model, {key: label})
 
 
 def _run_deep_analysis(client, cfg_now, selected_model, analyses):
-    """同步执行深度分析（舆情+板块+股东），带心跳"""
+    """启动深度分析（舆情+板块+股东）"""
     keys_to_run = [dk for dk in DEEP_KEYS if not analyses.get(dk)]
     if not keys_to_run:
         return
     label_map = {"sentiment": "舆情情绪", "sector": "板块联动", "holders": "股东动向"}
-    _run_parallel_with_heartbeat(
-        keys_to_run, client, cfg_now, selected_model,
-        f"深度分析（{len(keys_to_run)}项）", label_map, analyses,
-    )
-    st.session_state["_auto_sim"] = True
+    _start_bg_analysis(keys_to_run, client, cfg_now, selected_model, label_map)
 
 
 def render_analysis_tab(client, cfg_now, selected_model, email_addr):
@@ -216,10 +264,11 @@ def render_analysis_tab(client, cfg_now, selected_model, email_addr):
     analyses = st.session_state.get("analyses", {})
     current_user = st.session_state.get("current_user", "")
 
-    # 是否有待执行的分析（一键分析 / 单项分析）
+    # 是否有待执行的分析 / 正在后台运行的分析
     _pending_core = st.session_state.get("_pending_core_analysis", False)
     _pending_single = st.session_state.pop("_pending_single_key", None)
-    _is_analyzing = _pending_core or _pending_single is not None
+    _bg_running = st.session_state.get("_bg_analysis") is not None
+    _is_analyzing = _pending_core or _pending_single is not None or _bg_running
 
     # ── active_view 初始化 ────────────────────────────────────
     if "active_view" not in st.session_state:
@@ -295,25 +344,28 @@ def render_analysis_tab(client, cfg_now, selected_model, email_addr):
                     _run_deep_analysis(client, cfg_now, selected_model, analyses)
                     st.rerun()
 
-    # ── 执行待处理的分析（在按钮行之后、内容区之前）──────────
-    if _pending_core and client and stock_ready:
+    # ── 启动待处理的分析（后台线程）──────────────────────────
+    if _pending_core and client and stock_ready and not _bg_running:
         st.session_state.pop("_pending_core_analysis", None)
+        st.session_state.pop("_bg_tip_idx", None)
         keys_to_run = [k for k in CORE_KEYS if not analyses.get(k)]
         if keys_to_run:
             label_map = {"expectation": "预期差", "trend": "趋势", "fundamentals": "基本面"}
-            _run_parallel_with_heartbeat(
-                keys_to_run, client, cfg_now, selected_model,
-                f"一键分析（{len(keys_to_run)}项）", label_map, analyses,
-            )
+            _start_bg_analysis(keys_to_run, client, cfg_now, selected_model, label_map)
             st.rerun()
 
-    if _pending_single is not None and client and stock_ready:
+    if _pending_single is not None and client and stock_ready and not _bg_running:
         _single_labels = {"expectation": "预期差", "trend": "趋势", "fundamentals": "基本面",
                           "sentiment": "舆情", "sector": "板块", "holders": "股东"}
         _lbl = _single_labels.get(_pending_single, _pending_single)
         if not analyses.get(_pending_single):
-            _run_single_analysis(_pending_single, _lbl, client, cfg_now, selected_model, analyses)
+            _start_bg_analysis([_pending_single], client, cfg_now, selected_model,
+                               {_pending_single: _lbl})
             st.rerun()
+
+    # ── 轮询后台分析进度（会 sleep+rerun 直到完成）──────────
+    if _bg_running:
+        _poll_bg_analysis()  # 会 sleep(4) + st.rerun() 直到 finished
 
     # ── 紧凑状态栏 ──────────────────────────────────────────
     active_view = st.session_state.get("active_view", "overview")
@@ -382,13 +434,10 @@ def render_analysis_tab(client, cfg_now, selected_model, email_addr):
 
 
 def _run_core_analysis_all(client, cfg_now, selected_model):
-    """同步并行执行核心三项分析（用于重新分析按钮），带心跳"""
-    analyses = st.session_state.get("analyses", {})
+    """启动核心三项后台分析（用于重新分析按钮）"""
     label_map = {"expectation": "预期差", "trend": "趋势", "fundamentals": "基本面"}
-    _run_parallel_with_heartbeat(
-        list(CORE_KEYS), client, cfg_now, selected_model,
-        "重新分析", label_map, analyses,
-    )
+    st.session_state.pop("_bg_tip_idx", None)
+    _start_bg_analysis(list(CORE_KEYS), client, cfg_now, selected_model, label_map)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
