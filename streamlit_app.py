@@ -515,6 +515,13 @@ def main():
             if e: data_errors.append(e)
             st.session_state["stock_info"] = info
 
+            # 补全股票名称：resolve_stock 未找到名称时会返回代码作为 name
+            _cur_name = st.session_state.get("stock_name", "")
+            if _cur_name and _cur_name.replace(".", "").isdigit():
+                _real_name = info.get("名称", "") or info.get("name", "")
+                if _real_name:
+                    st.session_state["stock_name"] = _real_name
+
             df, e = _fetch_results["price"]
             if e: data_errors.append(e)
             st.session_state["price_df"] = df
