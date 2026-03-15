@@ -4,14 +4,14 @@
   "last_login": "2026-03-15T17:32:53",
   "preferences": {},
   "token_usage": {
-    "total": 105259,
-    "prompt": 87664,
-    "completion": 8000,
+    "total": 347520,
+    "prompt": 313925,
+    "completion": 24000,
     "daily": {
       "2026-03-15": {
-        "prompt": 87664,
-        "completion": 8000,
-        "total": 105259
+        "prompt": 313925,
+        "completion": 24000,
+        "total": 347520
       }
     }
   },
