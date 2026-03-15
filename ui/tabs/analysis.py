@@ -145,6 +145,7 @@ def _start_bg_analysis(keys, client, cfg_now, selected_model, label_map):
     analyses = st.session_state.get("analyses", {})
 
     # 后台状态对象（挂在 session_state 上，主线程可读）
+    import time as _t
     bg = {
         "keys": list(keys),
         "label_map": dict(label_map),
@@ -152,6 +153,7 @@ def _start_bg_analysis(keys, client, cfg_now, selected_model, label_map):
         "done_keys": [],       # 已完成的 key
         "errors": {},          # key → error msg
         "finished": False,     # 全部完成标志
+        "started_at": _t.time(),
     }
     st.session_state["_bg_analysis"] = bg
 
@@ -225,8 +227,10 @@ def _poll_bg_analysis():
         return False
 
     # 仍在运行 → 显示进度 + 心跳
+    import time as _t
+    _elapsed = int(_t.time() - bg.get("started_at", _t.time()))
     _remaining = [label_map.get(k, k) for k in bg["keys"] if k not in done_keys]
-    with st.status(f"⏳ 分析中（{done_count}/{total}）...", expanded=True, state="running") as status:
+    with st.status(f"⏳ 分析中（{done_count}/{total}）— 已等待 {_elapsed}s", expanded=True, state="running") as status:
         for k in done_keys:
             _lbl = label_map.get(k, k)
             if k in errors:
