@@ -237,11 +237,6 @@ def main():
     _top10_pick = st.session_state.pop("_top10_pick", None)
     _fast_rerun_global = st.session_state.pop("_fast_rerun", False)
 
-    # 默认值（两个分支都会覆盖，但提前初始化防止意外未定义）
-    query = ""
-    _go_clicked = False
-    _auto_search = False
-
     if _upper_collapsed:
         if _top10_pick:
             st.session_state["query_input"] = _top10_pick
@@ -637,10 +632,24 @@ def main():
                             }
                             for fut in as_completed(futures):
                                 k = futures[fut]
-                                result, err = fut.result()
+                                result, err, extra = fut.result()
                                 if not err and result:
                                     analyses[k] = result
                                     st.session_state["analyses"] = analyses
+                                    # 存储趋势分析附带的资金流数据
+                                    if extra:
+                                        cap = extra.get("capital_flow")
+                                        if cap is not None:
+                                            if isinstance(cap, _pd.DataFrame) and not cap.empty:
+                                                st.session_state["capital_flow_df"] = cap
+                                            elif isinstance(cap, str) and len(cap) > 20:
+                                                st.session_state["stock_capital"] = cap
+                                        nb = extra.get("northbound")
+                                        if nb and isinstance(nb, str) and "暂无" not in nb:
+                                            st.session_state["stock_northbound"] = nb
+                                        margin = extra.get("margin")
+                                        if margin and isinstance(margin, str) and "暂无" not in margin:
+                                            st.session_state["stock_margin"] = margin
                                 st.write(f"{'✅' if not err else '❌'} {_label_map.get(k, k)} 完成")
                         _status.update(label="✅ 分析完成！", state="complete")
 

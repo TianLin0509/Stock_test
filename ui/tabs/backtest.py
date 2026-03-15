@@ -4,6 +4,39 @@ import streamlit as st
 import pandas as pd
 
 
+def _win_rate_color(wr) -> str:
+    """返回胜率对应的背景色"""
+    if wr is None:
+        return "#6b7280"  # gray
+    if wr >= 60:
+        return "#22c55e"  # green
+    if wr >= 40:
+        return "#f59e0b"  # amber
+    return "#ef4444"      # red
+
+
+def _return_color(val) -> str:
+    """返回收益率对应的文字色"""
+    if val is None:
+        return "#6b7280"
+    return "#22c55e" if val >= 0 else "#ef4444"
+
+
+def _metric_card(label: str, value: str, bg_color: str = None, text_color: str = None):
+    """渲染带颜色背景的指标卡片"""
+    bg = bg_color or "transparent"
+    tc = text_color or "inherit"
+    st.markdown(f"""
+    <div style="
+        background: {bg}; border-radius: 8px; padding: 12px 16px;
+        text-align: center; color: white;
+    ">
+        <div style="font-size: 0.8rem; opacity: 0.85;">{label}</div>
+        <div style="font-size: 1.5rem; font-weight: 700; color: {tc};">{value}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+
 def render_backtest_tab():
     """渲染回测战绩 Tab"""
     from utils.backtest import (
@@ -110,34 +143,67 @@ def render_backtest_tab():
 
     # ── 核心指标卡片 ─────────────────────────────────────────
     st.markdown("#### 🏆 核心战绩")
+
+    # Row 1: 回测总量 + 三档胜率（色块卡片）
     mc1, mc2, mc3, mc4 = st.columns(4)
 
     with mc1:
         st.metric("回测记录", f"{stats['total_records']} 条")
     with mc2:
         wr5 = stats.get("win_rate_5d")
-        st.metric("5日胜率", f"{wr5}%" if wr5 is not None else "—")
+        _metric_card("5日胜率", f"{wr5}%" if wr5 is not None else "—",
+                     bg_color=_win_rate_color(wr5))
     with mc3:
         wr10 = stats.get("win_rate_10d")
-        st.metric("10日胜率", f"{wr10}%" if wr10 is not None else "—")
+        _metric_card("10日胜率", f"{wr10}%" if wr10 is not None else "—",
+                     bg_color=_win_rate_color(wr10))
     with mc4:
         wr20 = stats.get("win_rate_20d")
-        st.metric("20日胜率", f"{wr20}%" if wr20 is not None else "—")
+        _metric_card("20日胜率", f"{wr20}%" if wr20 is not None else "—",
+                     bg_color=_win_rate_color(wr20))
 
+    # Row 2: 平均收益（带涨跌色）+ 看多/看空 + 最佳个股
     mc5, mc6, mc7, mc8 = st.columns(4)
     with mc5:
         ar5 = stats.get("avg_return_5d")
-        st.metric("5日平均收益", f"{ar5:+.2f}%" if ar5 is not None else "—")
+        val5 = f"{ar5:+.2f}%" if ar5 is not None else "—"
+        _metric_card("5日平均收益", val5, bg_color="#1f2937",
+                     text_color=_return_color(ar5))
     with mc6:
         ar10 = stats.get("avg_return_10d")
-        st.metric("10日平均收益", f"{ar10:+.2f}%" if ar10 is not None else "—")
+        val10 = f"{ar10:+.2f}%" if ar10 is not None else "—"
+        _metric_card("10日平均收益", val10, bg_color="#1f2937",
+                     text_color=_return_color(ar10))
     with mc7:
         ar20 = stats.get("avg_return_20d")
-        st.metric("20日平均收益", f"{ar20:+.2f}%" if ar20 is not None else "—")
+        val20 = f"{ar20:+.2f}%" if ar20 is not None else "—"
+        _metric_card("20日平均收益", val20, bg_color="#1f2937",
+                     text_color=_return_color(ar20))
     with mc8:
         bull_n = stats.get("bullish_count", 0)
         bear_n = stats.get("bearish_count", 0)
         st.metric("看多/看空", f"{bull_n} / {bear_n}")
+
+    # ── 最佳个股高亮 ──────────────────────────────────────
+    valid_10d = bt_df[bt_df["return_10d"].notna()]
+    if not valid_10d.empty:
+        best_idx = valid_10d["return_10d"].idxmax()
+        best = valid_10d.loc[best_idx]
+        best_ret = best["return_10d"]
+        best_color = "#22c55e" if best_ret >= 0 else "#ef4444"
+        st.markdown(
+            f'<div style="background: linear-gradient(90deg, #1e293b, #0f172a); '
+            f'border-left: 4px solid {best_color}; border-radius: 6px; '
+            f'padding: 10px 16px; margin-top: 8px;">'
+            f'<span style="color: #94a3b8;">Best Pick:</span> '
+            f'<strong style="color: white;">{best["stock_name"]}</strong> '
+            f'<span style="color: #94a3b8;">({best["stock_code"]})</span> '
+            f'<span style="color: #94a3b8;">{best["date"]}</span> '
+            f'<span style="color: {best_color}; font-weight: 700; font-size: 1.1rem;">'
+            f'{best_ret:+.2f}%</span> (10日)'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
 
     # ── 按评级分组收益 ───────────────────────────────────────
     rating_data = stats.get("by_rating", [])
@@ -237,6 +303,29 @@ def render_backtest_tab():
     display_df["模型"] = display_df["模型"].apply(lambda x: str(x)[:12])
     display_df = display_df.sort_values("日期", ascending=False)
 
-    st.dataframe(display_df, use_container_width=True, hide_index=True)
+    # 涨跌幅列着色 + 强势个股行高亮
+    ret_cols = ["5日涨跌%", "10日涨跌%", "20日涨跌%"]
+
+    def _color_return(val):
+        """单元格涨跌色"""
+        if pd.isna(val):
+            return ""
+        return "color: #22c55e" if val >= 0 else "color: #ef4444"
+
+    def _highlight_strong(row):
+        """10日涨幅 >10% 的行加金色底"""
+        ret10 = row.get("10日涨跌%")
+        if pd.notna(ret10) and ret10 > 10:
+            return ["background-color: rgba(234,179,8,0.15)"] * len(row)
+        return [""] * len(row)
+
+    styled = (
+        display_df.style
+        .map(_color_return, subset=ret_cols)
+        .apply(_highlight_strong, axis=1)
+        .format({c: "{:+.2f}%" for c in ret_cols}, na_rep="—")
+    )
+
+    st.dataframe(styled, use_container_width=True, hide_index=True)
 
     st.caption("⚠️ 回测结果仅供参考，历史表现不代表未来收益。AI 分析存在局限性，请独立判断。")

@@ -13,6 +13,26 @@ from ui.charts import render_kline, render_valuation_bands
 from data.tushare_client import to_code6
 
 
+def _store_extra_data(extra: dict | None):
+    """将趋势分析附带的资金流数据存入 session_state，供信号雷达使用"""
+    if not extra:
+        return
+    cap = extra.get("capital_flow")
+    if cap is not None:
+        # cap 可能是 DataFrame 或字符串
+        import pandas as _pd
+        if isinstance(cap, _pd.DataFrame) and not cap.empty:
+            st.session_state["capital_flow_df"] = cap
+        elif isinstance(cap, str) and len(cap) > 20:
+            st.session_state["stock_capital"] = cap
+    nb = extra.get("northbound")
+    if nb and isinstance(nb, str) and "暂无" not in nb:
+        st.session_state["stock_northbound"] = nb
+    margin = extra.get("margin")
+    if margin and isinstance(margin, str) and "暂无" not in margin:
+        st.session_state["stock_margin"] = margin
+
+
 def _extract_conclusion(text: str, max_chars: int = 800) -> str:
     """从分析全文中提取结论/总结段落，保留 markdown 格式"""
     import re
@@ -50,7 +70,29 @@ def _show_stock_overview_basic():
     ts_code = st.session_state["stock_code"]
     info = st.session_state.get("stock_info", {})
 
-    st.markdown(f"### {name} &nbsp; `{to_code6(ts_code)}`")
+    # 自选股状态按钮
+    _title_col, _fav_col = st.columns([5, 1.5])
+    with _title_col:
+        st.markdown(f"### {name} &nbsp; `{to_code6(ts_code)}`")
+    with _fav_col:
+        from utils.user_store import get_watchlist, add_to_watchlist, remove_from_watchlist
+        _cur_user = st.session_state.get("current_user", "")
+        _in_wl = any(item["stock_code"] == ts_code for item in get_watchlist(_cur_user))
+        if _in_wl:
+            if st.button("➖ 移除自选", key="wl_remove_analysis", use_container_width=True):
+                _ok, _msg = remove_from_watchlist(_cur_user, ts_code)
+                st.toast(_msg)
+                if _ok:
+                    st.session_state.pop("_cached_user_data", None)
+                    st.rerun()
+        else:
+            if st.button("➕ 加入自选", key="wl_add_analysis", use_container_width=True):
+                _ok, _msg = add_to_watchlist(_cur_user, ts_code, name)
+                st.toast(_msg)
+                if _ok:
+                    st.session_state.pop("_cached_user_data", None)
+                    st.rerun()
+
     metrics = [
         ("最新价", info.get("最新价(元)", "—")),
         ("市盈率TTM", info.get("市盈率TTM", "—")),
@@ -80,7 +122,7 @@ def _run_single_analysis(key, label, client, cfg_now, selected_model, analyses):
 
     with st.status(f"⏳ {label}...", expanded=True) as status:
         st.write(f"📡 正在连接 {selected_model}...")
-        result, err = run_analysis_sync(
+        result, err, extra = run_analysis_sync(
             key, client, cfg_now, selected_model,
             name, tscode, info, fin, df,
             username=username,
@@ -92,6 +134,7 @@ def _run_single_analysis(key, label, client, cfg_now, selected_model, analyses):
         else:
             analyses[key] = result
             st.session_state["analyses"] = analyses
+            _store_extra_data(extra)
             status.update(label=f"✅ {label}完成！", state="complete")
 
 
@@ -125,10 +168,11 @@ def _run_deep_analysis(client, cfg_now, selected_model, analyses):
             }
             for fut in as_completed(futures):
                 k = futures[fut]
-                result, err = fut.result()
+                result, err, extra = fut.result()
                 if not err and result:
                     analyses[k] = result
                     st.session_state["analyses"] = analyses
+                    _store_extra_data(extra)
                 st.write(f"{'✅' if not err else '❌'} {label_map.get(k, k)} 完成")
         st.session_state["_auto_sim"] = True
         status.update(label="✅ 深度分析完成！", state="complete")
@@ -302,10 +346,11 @@ def _run_core_analysis_all(client, cfg_now, selected_model):
             }
             for fut in as_completed(futures):
                 k = futures[fut]
-                result, err = fut.result()
+                result, err, extra = fut.result()
                 if not err and result:
                     analyses[k] = result
                     st.session_state["analyses"] = analyses
+                    _store_extra_data(extra)
                 st.write(f"{'✅' if not err else '❌'} {label_map.get(k, k)} 完成")
         status.update(label="✅ 分析完成！", state="complete")
 

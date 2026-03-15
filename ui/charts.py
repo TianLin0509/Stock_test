@@ -110,12 +110,6 @@ def render_similar_case(case: dict, idx: int, target_df: pd.DataFrame = None,
     if ctx.empty:
         return
 
-    # 验证必要列存在
-    _required = {"open", "high", "low", "close", "vol", "trade_date", "is_match"}
-    if not _required.issubset(ctx.columns):
-        st.caption(f"案例数据列不完整，跳过")
-        return
-
     code = case["ts_code"]
     stock_name = case.get("stock_name", "") or code
     sim = case["similarity"]
@@ -128,11 +122,18 @@ def render_similar_case(case: dict, idx: int, target_df: pd.DataFrame = None,
     ret_text = f"后续走势 **{ret:+.1f}%**" if ret is not None else "后续数据不足"
     ret_color = ("🔴" if ret > 0 else "🟢" if ret < 0 else "⚪") if ret is not None else "⚪"
 
+    # 最大回撤与最大涨幅
+    max_dd = case.get("max_drawdown")
+    max_g = case.get("max_gain")
+    dd_text = ""
+    if max_dd is not None and max_g is not None:
+        dd_text = f" &nbsp;|&nbsp; 期间最大回撤 **{max_dd:+.1f}%** &nbsp; 最大涨幅 **{max_g:+.1f}%**"
+
     st.markdown(f"""
 **案例 {idx}：{stock_name}（{code}）** &nbsp;
 匹配区间 `{start_d}` ~ `{end_d}` &nbsp;
 综合 **{sim}%** &nbsp;|&nbsp; K线 **{kline_sim}%** &nbsp;|&nbsp;
-成交量 **{vol_sim}%** &nbsp; {ret_color} {ret_text}
+成交量 **{vol_sim}%** &nbsp; {ret_color} {ret_text}{dd_text}
 """)
 
     detail = case.get("feature_detail", {})

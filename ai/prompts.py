@@ -62,13 +62,16 @@ def build_expectation_prompt(name, ts_code, info) -> tuple[str, str]:
 
 
 def build_trend_prompt(name, ts_code, price_smry, capital, dragon,
-                       northbound="", margin="") -> tuple[str, str]:
+                       northbound="", margin="",
+                       indicators_section="") -> tuple[str, str]:
     """构建趋势分析 prompt，返回 (prompt, system)"""
     system = "你是资深A股技术分析师，深谙量价关系、主力行为与资金博弈。"
     prompt = f"""## 分析标的：{name}（{to_code6(ts_code)}）
 
 ## K线及量价数据
 {price_smry}
+
+{indicators_section}
 
 ## 主力资金流向（近15日）
 {capital[:700] if capital else '暂无'}

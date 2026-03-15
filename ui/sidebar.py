@@ -38,9 +38,38 @@ def render_sidebar(current_user: str, on_logout) -> tuple[str, str]:
             st.markdown('<div class="model-badge ok">✅ Tushare 连接正常</div>',
                         unsafe_allow_html=True)
         else:
-            st.markdown('<div class="model-badge warn">⚠️ 备用数据源就绪（akshare / 东方财富）</div>',
+            st.markdown('<div class="model-badge ok">✅ 备用数据源就绪（akshare / 东方财富）</div>',
                         unsafe_allow_html=True)
             st.caption(f"Tushare 不可用：{ts_error}，已自动切换备用源")
+
+        # ── 自选股 ─────────────────────────────────────────────────────
+        st.markdown("---")
+        st.markdown("### ⭐ 自选股")
+        from utils.user_store import get_watchlist, remove_from_watchlist
+        _wl = get_watchlist(current_user)
+        if _wl:
+            st.caption(f"共 {len(_wl)} 只 / 上限 20 只")
+            for _wi in _wl:
+                _wc = _wi["stock_code"]
+                _wn = _wi["stock_name"]
+                _col_name, _col_del = st.columns([3, 1])
+                with _col_name:
+                    if st.button(f"{_wn}", key=f"wl_pick_{_wc}", use_container_width=True):
+                        # 构造与 selectbox 一致的格式（6位代码 + 空格 + 名称）
+                        _code6 = _wc.split(".")[0] if "." in _wc else _wc
+                        st.session_state["query_input"] = f"{_code6} {_wn}"
+                        st.session_state["_upper_collapsed"] = False
+                        st.rerun()
+                with _col_del:
+                    if st.button("✖", key=f"wl_del_{_wc}"):
+                        _ok, _msg = remove_from_watchlist(current_user, _wc)
+                        if _ok:
+                            st.session_state.pop("_cached_user_data", None)
+                            st.rerun()
+                        else:
+                            st.toast(_msg)
+        else:
+            st.caption("暂无自选股，分析股票时可加入")
 
         st.markdown("---")
         st.markdown("### 📖 使用方法")

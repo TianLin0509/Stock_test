@@ -2,7 +2,7 @@
 
 import logging
 import pandas as pd
-from ai.client import call_ai
+from ai.client import call_ai, add_tokens
 from ai.context import build_analysis_context
 from ai.prompts import (
     build_expectation_prompt,
@@ -22,15 +22,21 @@ logger = logging.getLogger(__name__)
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _build_trend(name, tscode, df, progress_cb=None):
-    """趋势分析：并行获取资金/龙虎榜/北向/融资融券数据"""
+    """趋势分析：计算技术指标 + 并行获取资金/龙虎榜/北向/融资融券数据"""
     from concurrent.futures import ThreadPoolExecutor, as_completed
     from data.tushare_client import (
         get_capital_flow, get_dragon_tiger,
         get_northbound_flow, get_margin_trading,
     )
+    from data.indicators import compute_indicators, format_indicators_section
+
     if progress_cb:
         progress_cb("📊 计算K线技术指标 & 并行获取资金数据...")
     psmry = price_summary(df)
+
+    # 计算 RSI / MACD / 布林带
+    indicators = compute_indicators(df)
+    ind_section = format_indicators_section(indicators)
 
     _data_fns = {
         "cap": lambda: get_capital_flow(tscode),
@@ -50,7 +56,13 @@ def _build_trend(name, tscode, df, progress_cb=None):
     margin, _ = _results["margin"]
     if progress_cb:
         progress_cb("✅ 资金数据获取完成")
-    return build_trend_prompt(name, tscode, psmry, cap, dragon, nb, margin)
+
+    prompt_result = build_trend_prompt(name, tscode, psmry, cap, dragon, nb, margin,
+                                       indicators_section=ind_section)
+    # 返回 (prompt, system, extra_data) — extra_data 供主线程存入 session_state
+    p, s = prompt_result
+    extra = {"capital_flow": cap, "northbound": nb, "margin": margin}
+    return p, s, extra
 
 
 def _build_sector(name, tscode, info, progress_cb=None):
@@ -85,8 +97,9 @@ def _build_holders(name, tscode, info, progress_cb=None):
 
 def run_analysis_sync(key, client, cfg, model_name, name, tscode, info, fin, df,
                       username="", progress_cb=None):
-    """同步分析：构建prompt → call_ai → 返回 (result, error)
+    """同步分析：构建prompt → call_ai → 返回 (result, error, extra_data)
 
+    extra_data: 趋势分析时返回资金流数据供主线程存入 session_state，其他分析为 None。
     可从 ThreadPoolExecutor worker 调用（不要在 worker 中传 st.write 作为 progress_cb）。
     """
     # 分析调度表：key → (label, build_fn, build_args)
@@ -100,7 +113,7 @@ def run_analysis_sync(key, client, cfg, model_name, name, tscode, info, fin, df,
     }
 
     if key not in dispatch:
-        return None, f"未知分析类型: {key}"
+        return None, f"未知分析类型: {key}", None
 
     label, build_fn, build_args = dispatch[key]
 
@@ -108,8 +121,12 @@ def run_analysis_sync(key, client, cfg, model_name, name, tscode, info, fin, df,
         if progress_cb:
             progress_cb(f"📡 正在连接 {model_name}...")
 
-        # 趋势/板块/股东的 build 函数支持 progress_cb
-        if key in ("trend", "sector", "holders"):
+        extra_data = None
+
+        # 趋势分析返回 (prompt, system, extra_data)
+        if key == "trend":
+            p, s, extra_data = build_fn(*build_args, progress_cb=progress_cb)
+        elif key in ("sector", "holders"):
             p, s = build_fn(*build_args, progress_cb=progress_cb)
         else:
             p, s = build_fn(*build_args)
@@ -121,16 +138,16 @@ def run_analysis_sync(key, client, cfg, model_name, name, tscode, info, fin, df,
                             username=username)
 
         if err:
-            return None, err
+            return None, err, None
 
         if progress_cb:
             progress_cb(f"✅ {label}完成！")
 
-        return text, None
+        return text, None, extra_data
 
     except Exception as e:
         logger.debug("[run_analysis_sync/%s] 异常: %s", key, e)
-        return None, f"{label}异常：{e}"
+        return None, f"{label}异常：{e}", None
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -150,7 +167,7 @@ def run_moe_sync(client, cfg, model_name, name, tscode, analyses,
     try:
         if progress_cb:
             progress_cb("📋 汇总预期差、趋势、基本面三项分析结果...")
-        context = build_analysis_context(analyses, max_per_module=15)
+        context = build_analysis_context(analyses)
         if progress_cb:
             progress_cb("🏟️ 召集五方专家并行发表观点...")
 
@@ -183,8 +200,8 @@ def run_moe_sync(client, cfg, model_name, name, tscode, analyses,
         with ThreadPoolExecutor(max_workers=5) as pool:
             futs = {pool.submit(_call_role, role): role for role in MOE_ROLES}
             done_count = 0
-            for fut in as_completed(futs, timeout=180):
-                role, text = fut.result(timeout=60)
+            for fut in as_completed(futs):
+                role, text = fut.result()
                 role_results[role["key"]] = text
                 done_count += 1
                 if progress_cb:

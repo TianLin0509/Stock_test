@@ -101,6 +101,49 @@ def add_history_entry(username: str, stock_code: str, stock_name: str,
     save_user(data)
 
 
+def get_watchlist(username: str) -> list[dict]:
+    """获取用户自选股列表"""
+    if not username:
+        return []
+    data = load_user(username)
+    return data.get("watchlist", [])
+
+
+def add_to_watchlist(username: str, stock_code: str, stock_name: str) -> tuple[bool, str]:
+    """加入自选股，最多20只。返回 (成功, 消息)"""
+    if not username:
+        return False, "未登录"
+    data = load_user(username)
+    wl = data.setdefault("watchlist", [])
+    # 去重检查
+    for item in wl:
+        if item["stock_code"] == stock_code:
+            return False, f"{stock_name} 已在自选股中"
+    if len(wl) >= 20:
+        return False, "自选股已满（最多20只），请先移除再添加"
+    wl.append({
+        "stock_code": stock_code,
+        "stock_name": stock_name,
+        "added_at": datetime.now().isoformat(timespec="seconds"),
+    })
+    save_user(data)
+    return True, f"已将 {stock_name} 加入自选股"
+
+
+def remove_from_watchlist(username: str, stock_code: str) -> tuple[bool, str]:
+    """移除自选股。返回 (成功, 消息)"""
+    if not username:
+        return False, "未登录"
+    data = load_user(username)
+    wl = data.get("watchlist", [])
+    new_wl = [item for item in wl if item["stock_code"] != stock_code]
+    if len(new_wl) == len(wl):
+        return False, "该股票不在自选股中"
+    data["watchlist"] = new_wl
+    save_user(data)
+    return True, "已从自选股移除"
+
+
 def get_all_users_summary() -> list[dict]:
     DATA_DIR.mkdir(exist_ok=True)
     summaries = []

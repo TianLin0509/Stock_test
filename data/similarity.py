@@ -1,6 +1,7 @@
 """
-📐 历史相似走势匹配算法 v2
+📐 历史相似走势匹配算法 v3
 五维 K 线特征：涨跌幅形态 + 成交量节奏 + 振幅 + 上影线 + 下影线
+新增：全样本胜率统计 + 最大回撤/最大涨幅追踪
 """
 
 import numpy as np
@@ -279,7 +280,7 @@ def find_similar(
         best_idx = int(np.argmax(similarity))
         best_sim = similarity[best_idx]
 
-        if best_sim < 0.3:
+        if best_sim < 0.45:
             continue
 
         # ── 提取上下文 K 线 ───────────────────────────────────────────────
@@ -294,14 +295,22 @@ def find_similar(
         match_slice = slice(match_start - ctx_start, match_end - ctx_start + 1)
         ctx_df.iloc[match_slice, ctx_df.columns.get_loc("is_match")] = True
 
-        # 后续涨跌幅
+        # 后续涨跌幅 + 最大回撤 + 最大涨幅
         if match_end + 1 < len(grp):
             future_end = min(match_end + context_days, len(grp) - 1)
-            future_close = grp.iloc[future_end]["close"]
             match_close  = grp.iloc[match_end]["close"]
+            future_close = grp.iloc[future_end]["close"]
             subsequent_ret = (future_close / match_close - 1) * 100
+
+            # 后续期间内每日收盘价序列
+            future_closes = grp.iloc[match_end:future_end + 1]["close"].values.astype(np.float64)
+            future_returns = (future_closes / match_close - 1) * 100
+            max_drawdown = round(float(future_returns.min()), 2)
+            max_gain = round(float(future_returns.max()), 2)
         else:
             subsequent_ret = None
+            max_drawdown = None
+            max_gain = None
 
         # ── 五维分项得分（展示用）──────────────────────────────────────────
         detail = {}
@@ -339,6 +348,8 @@ def find_similar(
             "match_start_date":  grp.iloc[match_start]["trade_date"],
             "match_end_date":    grp.iloc[match_end]["trade_date"],
             "subsequent_return": round(subsequent_ret, 2) if subsequent_ret is not None else None,
+            "max_drawdown":      max_drawdown,
+            "max_gain":          max_gain,
             "context_df":        ctx_df,
             "feature_detail":    detail,
         })
@@ -357,5 +368,28 @@ def find_similar(
             results.append(c)
         if len(results) >= top_n:
             break
+
+    # ── 全样本胜率统计（基于所有超过阈值的匹配）──────────────────────
+    all_returns = [c["subsequent_return"] for c in all_candidates
+                   if c["subsequent_return"] is not None]
+    if all_returns:
+        returns_arr = np.array(all_returns)
+        match_stats = {
+            "total_matches": len(all_candidates),
+            "win_rate_10d": round(float((returns_arr > 0).sum() / len(returns_arr) * 100), 1),
+            "avg_return_10d": round(float(returns_arr.mean()), 2),
+            "median_return_10d": round(float(np.median(returns_arr)), 2),
+        }
+    else:
+        match_stats = {
+            "total_matches": len(all_candidates),
+            "win_rate_10d": 0.0,
+            "avg_return_10d": 0.0,
+            "median_return_10d": 0.0,
+        }
+
+    # 将统计信息附加到每个结果
+    for r in results:
+        r["match_stats"] = match_stats
 
     return results

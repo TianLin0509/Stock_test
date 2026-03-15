@@ -301,7 +301,7 @@ def _render_free_question(client, cfg, model_name, name, tscode, info, analyses)
             st.write(f"📡 正在连接 {model_name}...")
             time.sleep(0.5)
             st.write("📎 整理已有分析上下文作为参考...")
-            context = build_analysis_context(analyses, max_per_module=12)
+            context = build_analysis_context(analyses)
             time.sleep(0.4)
             metrics_parts = []
             for k in ["最新价(元)", "市盈率TTM", "市净率PB", "行业"]:
@@ -376,11 +376,6 @@ def _show_similarity_section(name: str, tscode: str):
     price_df = st.session_state.get("price_df", pd.DataFrame())
     if price_df.empty or len(price_df) < 5:
         st.warning("K线数据不足，请先查询股票")
-        return
-
-    _required_cols = {"日期", "开盘", "最高", "最低", "收盘", "成交量", "涨跌幅"}
-    if not _required_cols.issubset(price_df.columns):
-        st.warning("K线数据格式异常，缺少必要列")
         return
 
     st.markdown("---")
@@ -464,14 +459,63 @@ def _render_similarity_results(results: list, target_df: pd.DataFrame = None,
         st.info("未找到足够相似的历史走势案例")
         return
 
-    # 后续走势统计
+    # ── 全样本胜率统计（优先显示）──────────────────────────────────────
+    match_stats = results[0].get("match_stats") if results else None
+    if match_stats and match_stats["total_matches"] > 0:
+        total = match_stats["total_matches"]
+        wr = match_stats["win_rate_10d"]
+        avg_r = match_stats["avg_return_10d"]
+        med_r = match_stats["median_return_10d"]
+
+        # 胜率颜色：>55% 绿色，<45% 红色，否则中性
+        if wr > 55:
+            wr_color = "#16a34a"
+            wr_bg = "#f0fdf4"
+            wr_border = "#bbf7d0"
+            wr_label = "偏多"
+        elif wr < 45:
+            wr_color = "#dc2626"
+            wr_bg = "#fef2f2"
+            wr_border = "#fecaca"
+            wr_label = "偏空"
+        else:
+            wr_color = "#d97706"
+            wr_bg = "#fffbeb"
+            wr_border = "#fde68a"
+            wr_label = "中性"
+
+        avg_color = "#16a34a" if avg_r > 0 else "#dc2626" if avg_r < 0 else "#6b7280"
+        med_color = "#16a34a" if med_r > 0 else "#dc2626" if med_r < 0 else "#6b7280"
+
+        st.markdown(
+            f'<div style="padding:12px 16px;background:{wr_bg};border:1px solid {wr_border};'
+            f'border-radius:10px;margin-bottom:12px;">'
+            f'<div style="font-size:0.85rem;font-weight:700;color:#374151;margin-bottom:6px;">'
+            f'全样本统计（相似度 > 45% 的所有匹配）</div>'
+            f'<div style="display:flex;gap:24px;flex-wrap:wrap;">'
+            f'<div><span style="color:#6b7280;font-size:0.78rem;">匹配总数</span><br>'
+            f'<span style="font-size:1.1rem;font-weight:700;">{total}</span> 只</div>'
+            f'<div><span style="color:#6b7280;font-size:0.78rem;">10日胜率</span><br>'
+            f'<span style="font-size:1.1rem;font-weight:700;color:{wr_color};">'
+            f'{wr}%</span> <span style="font-size:0.75rem;color:{wr_color};">{wr_label}</span></div>'
+            f'<div><span style="color:#6b7280;font-size:0.78rem;">平均收益</span><br>'
+            f'<span style="font-size:1.1rem;font-weight:700;color:{avg_color};">'
+            f'{avg_r:+.2f}%</span></div>'
+            f'<div><span style="color:#6b7280;font-size:0.78rem;">中位数收益</span><br>'
+            f'<span style="font-size:1.1rem;font-weight:700;color:{med_color};">'
+            f'{med_r:+.2f}%</span></div>'
+            f'</div></div>',
+            unsafe_allow_html=True,
+        )
+
+    # ── Top N 案例统计 ────────────────────────────────────────────────
     returns = [r["subsequent_return"] for r in results if r["subsequent_return"] is not None]
     if returns:
         avg_ret = sum(returns) / len(returns)
         up_count = sum(1 for r in returns if r > 0)
         color = "🔴" if avg_ret > 0 else "🟢"
         st.markdown(
-            f"**历史参考：** Top {len(results)} 相似案例中，"
+            f"**Top {len(results)} 案例：** "
             f"{up_count} 个后续上涨、{len(returns) - up_count} 个下跌，"
             f"平均后续涨跌 {color} **{avg_ret:+.1f}%**"
         )
