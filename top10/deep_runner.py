@@ -307,7 +307,12 @@ def run_deep_top10(model_name: str = "🟤 豆包 · Seed 2.0 Mini",
 
     with _running_lock:
         if _is_running:
-            logger.warning("[deep_top10] 已有任务在运行，跳过")
+            logger.warning("[deep_top10] 已有任务在运行（进程内），跳过")
+            return
+        # 跨进程检查：状态文件标记 running 则跳过
+        _cur_status = get_deep_status()
+        if _cur_status and _cur_status.get("status") == "running":
+            logger.warning("[deep_top10] 已有任务在运行（跨进程），跳过")
             return
         _is_running = True
 

@@ -73,11 +73,11 @@ def _scheduler_loop():
             logger.info("[scheduler] 今日非交易日，跳过")
             continue
 
-        # 检查是否已有今日缓存（避免重复运行）
+        # 检查是否已有今日缓存（避免多进程重复运行）
         from top10.deep_runner import get_deep_status, is_deep_running
         status = get_deep_status()
-        if status and status.get("status") == "done":
-            logger.info("[scheduler] 今日深度分析已完成，跳过")
+        if status and status.get("status") in ("done", "running"):
+            logger.info("[scheduler] 今日深度分析已完成或正在运行，跳过")
             continue
         if is_deep_running():
             logger.info("[scheduler] 深度分析正在运行中，跳过")
