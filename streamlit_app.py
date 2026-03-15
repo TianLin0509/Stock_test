@@ -610,55 +610,11 @@ def main():
                 st.session_state["_last_query"] = query
                 stock_ready = True
                 analyses = st.session_state.get("analyses", {})  # 刷新（可能已从归档恢复）
-            # 同步并行执行核心三项分析
+            # 标记待执行的核心分析，交给 analysis tab 内部执行（保持 Tab/按钮可见）
             if client:
                 keys_to_run = [k for k in CORE_KEYS if not analyses.get(k)]
                 if keys_to_run:
-                    from concurrent.futures import ThreadPoolExecutor, as_completed
-                    import pandas as _pd
-
-                    _name = st.session_state.get("stock_name", "")
-                    _tscode = st.session_state.get("stock_code", "")
-                    _info = dict(st.session_state.get("stock_info", {}))
-                    _fin = st.session_state.get("stock_fin", "")
-                    _df = st.session_state.get("price_df", _pd.DataFrame())
-                    if not _df.empty:
-                        _df = _df.copy()
-                    _username = st.session_state.get("current_user", "")
-
-                    _label_map = {"expectation": "预期差", "trend": "趋势", "fundamentals": "基本面"}
-
-                    with st.status(f"🚀 一键分析（{len(keys_to_run)}项）...", expanded=True) as _status:
-                        st.write(f"并行启动 {len(keys_to_run)} 项核心分析...")
-                        with ThreadPoolExecutor(max_workers=3) as pool:
-                            futures = {
-                                pool.submit(
-                                    run_analysis_sync, k, client, cfg_now, selected_model,
-                                    _name, _tscode, _info, _fin, _df, _username
-                                ): k for k in keys_to_run
-                            }
-                            for fut in as_completed(futures):
-                                k = futures[fut]
-                                result, err, extra = fut.result()
-                                if not err and result:
-                                    analyses[k] = result
-                                    st.session_state["analyses"] = analyses
-                                    # 存储趋势分析附带的资金流数据
-                                    if extra:
-                                        cap = extra.get("capital_flow")
-                                        if cap is not None:
-                                            if isinstance(cap, _pd.DataFrame) and not cap.empty:
-                                                st.session_state["capital_flow_df"] = cap
-                                            elif isinstance(cap, str) and len(cap) > 20:
-                                                st.session_state["stock_capital"] = cap
-                                        nb = extra.get("northbound")
-                                        if nb and isinstance(nb, str) and "暂无" not in nb:
-                                            st.session_state["stock_northbound"] = nb
-                                        margin = extra.get("margin")
-                                        if margin and isinstance(margin, str) and "暂无" not in margin:
-                                            st.session_state["stock_margin"] = margin
-                                st.write(f"{'✅' if not err else '❌'} {_label_map.get(k, k)} 完成")
-                        _status.update(label="✅ 分析完成！", state="complete")
+                    st.session_state["_pending_core_analysis"] = True
 
             st.session_state["active_view"] = "overview"
             st.rerun()

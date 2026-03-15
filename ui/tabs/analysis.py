@@ -1,5 +1,7 @@
 """Tab 1: 📊 智能分析 — 从 streamlit_app.py 提取"""
 
+import threading
+import time as _time
 import streamlit as st
 import pandas as pd
 
@@ -109,8 +111,8 @@ def _show_stock_overview_basic():
         with col: st.metric(label, str(val)[:14])
 
 
-def _run_single_analysis(key, label, client, cfg_now, selected_model, analyses):
-    """同步执行单个分析并更新 session_state"""
+def _extract_session_data():
+    """从 session_state 提取分析所需数据（主线程调用）"""
     name = st.session_state.get("stock_name", "")
     tscode = st.session_state.get("stock_code", "")
     info = dict(st.session_state.get("stock_info", {}))
@@ -119,63 +121,89 @@ def _run_single_analysis(key, label, client, cfg_now, selected_model, analyses):
     if not df.empty:
         df = df.copy()
     username = st.session_state.get("current_user", "")
+    return name, tscode, info, fin, df, username
 
-    with st.status(f"⏳ {label}...", expanded=True) as status:
-        st.write(f"📡 正在连接 {selected_model}...")
-        result, err, extra = run_analysis_sync(
-            key, client, cfg_now, selected_model,
-            name, tscode, info, fin, df,
-            username=username,
-            progress_cb=lambda msg: st.write(msg),
-        )
-        if err:
-            status.update(label=f"❌ {label}失败", state="error")
-            st.error(f"分析失败：{err}")
-        else:
-            analyses[key] = result
-            st.session_state["analyses"] = analyses
-            _store_extra_data(extra)
-            status.update(label=f"✅ {label}完成！", state="complete")
+
+_HEARTBEAT_TIPS = [
+    "正在联网搜索最新资讯…",
+    "正在整理分析数据…",
+    "正在等待 AI 响应…",
+    "AI 正在深度思考中…",
+    "即将开始输出结果…",
+    "AI 还在思考，请耐心等待…",
+    "正在综合多维度数据…",
+    "分析内容较多，稍等片刻…",
+]
+
+
+def _run_parallel_with_heartbeat(keys, client, cfg_now, selected_model,
+                                  status_label, label_map, analyses):
+    """并行执行多项分析，带心跳进度输出"""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    name, tscode, info, fin, df, username = _extract_session_data()
+
+    with st.status(f"⏳ {status_label}...", expanded=True) as status:
+        st.write(f"📡 并行启动 {len(keys)} 项分析（{selected_model}）...")
+
+        # 心跳：每2秒输出进度提示，直到所有任务完成
+        _done_event = threading.Event()
+        _status_container = st.empty()  # 用于更新心跳消息
+
+        def _heartbeat():
+            elapsed = 0
+            idx = 0
+            while not _done_event.wait(timeout=2):
+                elapsed += 2
+                tip = _HEARTBEAT_TIPS[min(idx, len(_HEARTBEAT_TIPS) - 1)]
+                _status_container.caption(f"⏱️ 已等待 {elapsed}s — {tip}")
+                idx += 1
+
+        hb = threading.Thread(target=_heartbeat, daemon=True)
+        hb.start()
+
+        try:
+            with ThreadPoolExecutor(max_workers=3) as pool:
+                futures = {
+                    pool.submit(
+                        run_analysis_sync, k, client, cfg_now, selected_model,
+                        name, tscode, info, fin, df, username
+                    ): k for k in keys
+                }
+                for fut in as_completed(futures):
+                    k = futures[fut]
+                    result, err, extra = fut.result()
+                    if not err and result:
+                        analyses[k] = result
+                        st.session_state["analyses"] = analyses
+                        _store_extra_data(extra)
+                    st.write(f"{'✅' if not err else '❌'} {label_map.get(k, k)} 完成")
+        finally:
+            _done_event.set()
+            _status_container.empty()
+
+        status.update(label=f"✅ {status_label}完成！", state="complete")
+
+
+def _run_single_analysis(key, label, client, cfg_now, selected_model, analyses):
+    """同步执行单个分析并更新 session_state，带心跳"""
+    _run_parallel_with_heartbeat(
+        [key], client, cfg_now, selected_model,
+        label, {key: label}, analyses,
+    )
 
 
 def _run_deep_analysis(client, cfg_now, selected_model, analyses):
-    """同步执行深度分析（舆情+板块+股东）"""
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-
-    name = st.session_state.get("stock_name", "")
-    tscode = st.session_state.get("stock_code", "")
-    info = dict(st.session_state.get("stock_info", {}))
-    fin = st.session_state.get("stock_fin", "")
-    df = st.session_state.get("price_df", pd.DataFrame())
-    if not df.empty:
-        df = df.copy()
-    username = st.session_state.get("current_user", "")
-
+    """同步执行深度分析（舆情+板块+股东），带心跳"""
     keys_to_run = [dk for dk in DEEP_KEYS if not analyses.get(dk)]
     if not keys_to_run:
         return
-
     label_map = {"sentiment": "舆情情绪", "sector": "板块联动", "holders": "股东动向"}
-
-    with st.status(f"🔬 深度分析（{len(keys_to_run)}项）...", expanded=True) as status:
-        st.write(f"并行启动 {len(keys_to_run)} 项深度分析...")
-        with ThreadPoolExecutor(max_workers=3) as pool:
-            futures = {
-                pool.submit(
-                    run_analysis_sync, k, client, cfg_now, selected_model,
-                    name, tscode, info, fin, df, username
-                ): k for k in keys_to_run
-            }
-            for fut in as_completed(futures):
-                k = futures[fut]
-                result, err, extra = fut.result()
-                if not err and result:
-                    analyses[k] = result
-                    st.session_state["analyses"] = analyses
-                    _store_extra_data(extra)
-                st.write(f"{'✅' if not err else '❌'} {label_map.get(k, k)} 完成")
-        st.session_state["_auto_sim"] = True
-        status.update(label="✅ 深度分析完成！", state="complete")
+    _run_parallel_with_heartbeat(
+        keys_to_run, client, cfg_now, selected_model,
+        f"深度分析（{len(keys_to_run)}项）", label_map, analyses,
+    )
+    st.session_state["_auto_sim"] = True
 
 
 def render_analysis_tab(client, cfg_now, selected_model, email_addr):
@@ -183,6 +211,11 @@ def render_analysis_tab(client, cfg_now, selected_model, email_addr):
     stock_ready = bool(st.session_state.get("stock_name"))
     analyses = st.session_state.get("analyses", {})
     current_user = st.session_state.get("current_user", "")
+
+    # 是否有待执行的分析（一键分析 / 单项分析）
+    _pending_core = st.session_state.get("_pending_core_analysis", False)
+    _pending_single = st.session_state.pop("_pending_single_key", None)
+    _is_analyzing = _pending_core or _pending_single is not None
 
     # ── active_view 初始化 ────────────────────────────────────
     if "active_view" not in st.session_state:
@@ -206,24 +239,28 @@ def render_analysis_tab(client, cfg_now, selected_model, email_addr):
             done = bool(analyses.get(key))
             _btn_type = "primary" if active_view == key else "secondary"
 
-            if done:
+            if _is_analyzing and not done:
+                _btn_label = f"⏳ {label}"
+            elif done:
                 _btn_label = f"✅ {label}"
             else:
                 _btn_label = f"{icon} {label}"
 
             query = st.session_state.get("query_input", "")
+            # 分析进行中时禁用所有按钮
+            _disabled = _is_analyzing or (not stock_ready and not query)
             if st.button(_btn_label, type=_btn_type,
                          use_container_width=True, key=f"btn_{key}",
-                         disabled=(not stock_ready and not query)):
+                         disabled=_disabled):
                 st.session_state["active_view"] = key
                 if not done:
                     if not stock_ready and query:
-                        # 需要先解析股票 — 委托回主模块
                         st.session_state["_pending_resolve"] = query
                         st.session_state["_pending_analysis_key"] = key
                         st.rerun()
                     if client and stock_ready:
-                        _run_single_analysis(key, label, client, cfg_now, selected_model, analyses)
+                        # 标记待执行，下次 rerun 时在下方执行
+                        st.session_state["_pending_single_key"] = key
                         st.rerun()
                 else:
                     st.rerun()
@@ -237,7 +274,7 @@ def render_analysis_tab(client, cfg_now, selected_model, email_addr):
             _summary_label = "📊 总结"
         if st.button(_summary_label, type=_summary_type,
                      use_container_width=True, key="btn_summary",
-                     disabled=not core_all_done):
+                     disabled=_is_analyzing or not core_all_done):
             st.session_state["active_view"] = "summary"
             st.rerun()
 
@@ -248,10 +285,31 @@ def render_analysis_tab(client, cfg_now, selected_model, email_addr):
                       use_container_width=True, key="btn_deep")
         else:
             if st.button("🔬 开始深度分析（舆情+板块+股东）", use_container_width=True,
-                         key="btn_deep", type="primary"):
+                         key="btn_deep", type="primary",
+                         disabled=_is_analyzing):
                 if client:
                     _run_deep_analysis(client, cfg_now, selected_model, analyses)
                     st.rerun()
+
+    # ── 执行待处理的分析（在按钮行之后、内容区之前）──────────
+    if _pending_core and client and stock_ready:
+        st.session_state.pop("_pending_core_analysis", None)
+        keys_to_run = [k for k in CORE_KEYS if not analyses.get(k)]
+        if keys_to_run:
+            label_map = {"expectation": "预期差", "trend": "趋势", "fundamentals": "基本面"}
+            _run_parallel_with_heartbeat(
+                keys_to_run, client, cfg_now, selected_model,
+                f"一键分析（{len(keys_to_run)}项）", label_map, analyses,
+            )
+            st.rerun()
+
+    if _pending_single is not None and client and stock_ready:
+        _single_labels = {"expectation": "预期差", "trend": "趋势", "fundamentals": "基本面",
+                          "sentiment": "舆情", "sector": "板块", "holders": "股东"}
+        _lbl = _single_labels.get(_pending_single, _pending_single)
+        if not analyses.get(_pending_single):
+            _run_single_analysis(_pending_single, _lbl, client, cfg_now, selected_model, analyses)
+            st.rerun()
 
     # ── 紧凑状态栏 ──────────────────────────────────────────
     active_view = st.session_state.get("active_view", "overview")
@@ -320,39 +378,13 @@ def render_analysis_tab(client, cfg_now, selected_model, email_addr):
 
 
 def _run_core_analysis_all(client, cfg_now, selected_model):
-    """同步并行执行核心三项分析（用于重新分析按钮）"""
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-
-    name = st.session_state.get("stock_name", "")
-    tscode = st.session_state.get("stock_code", "")
-    info = dict(st.session_state.get("stock_info", {}))
-    fin = st.session_state.get("stock_fin", "")
-    df = st.session_state.get("price_df", pd.DataFrame())
-    if not df.empty:
-        df = df.copy()
-    username = st.session_state.get("current_user", "")
+    """同步并行执行核心三项分析（用于重新分析按钮），带心跳"""
     analyses = st.session_state.get("analyses", {})
-
     label_map = {"expectation": "预期差", "trend": "趋势", "fundamentals": "基本面"}
-
-    with st.status("🚀 重新分析...", expanded=True) as status:
-        st.write(f"并行启动 {len(CORE_KEYS)} 项核心分析...")
-        with ThreadPoolExecutor(max_workers=3) as pool:
-            futures = {
-                pool.submit(
-                    run_analysis_sync, k, client, cfg_now, selected_model,
-                    name, tscode, info, fin, df, username
-                ): k for k in CORE_KEYS
-            }
-            for fut in as_completed(futures):
-                k = futures[fut]
-                result, err, extra = fut.result()
-                if not err and result:
-                    analyses[k] = result
-                    st.session_state["analyses"] = analyses
-                    _store_extra_data(extra)
-                st.write(f"{'✅' if not err else '❌'} {label_map.get(k, k)} 完成")
-        status.update(label="✅ 分析完成！", state="complete")
+    _run_parallel_with_heartbeat(
+        list(CORE_KEYS), client, cfg_now, selected_model,
+        "重新分析", label_map, analyses,
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
