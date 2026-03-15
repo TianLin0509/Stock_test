@@ -171,6 +171,10 @@ def _start_bg_analysis(keys, client, cfg_now, selected_model, label_map):
     }
     st.session_state["_bg_analysis"] = bg
 
+    # 暂存后台线程产出的数据（避免线程内直接写 st.session_state，Python 3.13 会触发 Event loop is closed）
+    bg["_results"] = {}   # key → result text
+    bg["_extras"] = {}    # key → extra dict
+
     def _worker():
         with ThreadPoolExecutor(max_workers=3) as pool:
             futures = {
@@ -183,23 +187,9 @@ def _start_bg_analysis(keys, client, cfg_now, selected_model, label_map):
                 k = futures[fut]
                 result, err, extra = fut.result()
                 if not err and result:
-                    analyses[k] = result
-                    st.session_state["analyses"] = analyses
+                    bg["_results"][k] = result
                     if extra:
-                        # 资金数据存入 session_state（线程安全：Streamlit dict 是普通 dict）
-                        cap = extra.get("capital_flow")
-                        if cap is not None:
-                            import pandas as _pd
-                            if isinstance(cap, _pd.DataFrame) and not cap.empty:
-                                st.session_state["capital_flow_df"] = cap
-                            elif isinstance(cap, str) and len(cap) > 20:
-                                st.session_state["stock_capital"] = cap
-                        nb = extra.get("northbound")
-                        if nb and isinstance(nb, str) and "暂无" not in nb:
-                            st.session_state["stock_northbound"] = nb
-                        margin = extra.get("margin")
-                        if margin and isinstance(margin, str) and "暂无" not in margin:
-                            st.session_state["stock_margin"] = margin
+                        bg["_extras"][k] = extra
                     bg["done_keys"].append(k)
                 else:
                     bg["errors"][k] = err or "未知错误"
@@ -224,6 +214,29 @@ def _poll_bg_analysis():
     done_keys = bg["done_keys"]
     errors = bg["errors"]
     done_count = len(done_keys)
+
+    # ── 主线程同步：将后台线程暂存的结果写入 session_state ──
+    _bg_results = bg.get("_results", {})
+    _bg_extras = bg.get("_extras", {})
+    if _bg_results:
+        analyses = st.session_state.get("analyses", {})
+        for k, result in list(_bg_results.items()):
+            analyses[k] = result
+        st.session_state["analyses"] = analyses
+        for k, extra in list(_bg_extras.items()):
+            import pandas as _pd
+            cap = extra.get("capital_flow")
+            if cap is not None:
+                if isinstance(cap, _pd.DataFrame) and not cap.empty:
+                    st.session_state["capital_flow_df"] = cap
+                elif isinstance(cap, str) and len(cap) > 20:
+                    st.session_state["stock_capital"] = cap
+            nb = extra.get("northbound")
+            if nb and isinstance(nb, str) and "暂无" not in nb:
+                st.session_state["stock_northbound"] = nb
+            margin = extra.get("margin")
+            if margin and isinstance(margin, str) and "暂无" not in margin:
+                st.session_state["stock_margin"] = margin
 
     if bg["finished"]:
         # 全部完成 → 清理状态，按钮已自动显示 ✅，无需额外提示
