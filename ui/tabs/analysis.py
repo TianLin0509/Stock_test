@@ -1,7 +1,5 @@
 """Tab 1: 📊 智能分析 — 从 streamlit_app.py 提取"""
 
-import threading
-import time as _time
 import streamlit as st
 import pandas as pd
 
@@ -138,49 +136,45 @@ _HEARTBEAT_TIPS = [
 
 def _run_parallel_with_heartbeat(keys, client, cfg_now, selected_model,
                                   status_label, label_map, analyses):
-    """并行执行多项分析，带心跳进度输出"""
-    from concurrent.futures import ThreadPoolExecutor, as_completed
+    """并行执行多项分析，主线程轮询 + 心跳进度输出"""
+    from concurrent.futures import ThreadPoolExecutor, as_completed, FIRST_COMPLETED, wait
 
     name, tscode, info, fin, df, username = _extract_session_data()
 
     with st.status(f"⏳ {status_label}...", expanded=True) as status:
         st.write(f"📡 并行启动 {len(keys)} 项分析（{selected_model}）...")
 
-        # 心跳：每2秒输出进度提示，直到所有任务完成
-        _done_event = threading.Event()
-        _status_container = st.empty()  # 用于更新心跳消息
-
-        def _heartbeat():
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            futures = {
+                pool.submit(
+                    run_analysis_sync, k, client, cfg_now, selected_model,
+                    name, tscode, info, fin, df, username
+                ): k for k in keys
+            }
+            pending = set(futures.keys())
             elapsed = 0
-            idx = 0
-            while not _done_event.wait(timeout=2):
-                elapsed += 2
-                tip = _HEARTBEAT_TIPS[min(idx, len(_HEARTBEAT_TIPS) - 1)]
-                _status_container.caption(f"⏱️ 已等待 {elapsed}s — {tip}")
-                idx += 1
+            tip_idx = 0
 
-        hb = threading.Thread(target=_heartbeat, daemon=True)
-        hb.start()
+            while pending:
+                # 等待最多 2 秒，看有没有任务完成
+                done, pending = wait(pending, timeout=2, return_when=FIRST_COMPLETED)
 
-        try:
-            with ThreadPoolExecutor(max_workers=3) as pool:
-                futures = {
-                    pool.submit(
-                        run_analysis_sync, k, client, cfg_now, selected_model,
-                        name, tscode, info, fin, df, username
-                    ): k for k in keys
-                }
-                for fut in as_completed(futures):
-                    k = futures[fut]
-                    result, err, extra = fut.result()
-                    if not err and result:
-                        analyses[k] = result
-                        st.session_state["analyses"] = analyses
-                        _store_extra_data(extra)
-                    st.write(f"{'✅' if not err else '❌'} {label_map.get(k, k)} 完成")
-        finally:
-            _done_event.set()
-            _status_container.empty()
+                if done:
+                    # 有任务完成，处理结果
+                    for fut in done:
+                        k = futures[fut]
+                        result, err, extra = fut.result()
+                        if not err and result:
+                            analyses[k] = result
+                            st.session_state["analyses"] = analyses
+                            _store_extra_data(extra)
+                        st.write(f"{'✅' if not err else '❌'} {label_map.get(k, k)} 完成")
+                else:
+                    # 2 秒内无任务完成 → 输出心跳
+                    elapsed += 2
+                    tip = _HEARTBEAT_TIPS[min(tip_idx, len(_HEARTBEAT_TIPS) - 1)]
+                    st.write(f"⏱️ 已等待 {elapsed}s — {tip}")
+                    tip_idx += 1
 
         status.update(label=f"✅ {status_label}完成！", state="complete")
 
