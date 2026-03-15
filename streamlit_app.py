@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-📈 呆瓜方后援会专属投研助手 v6.01
+📈 呆瓜方后援会专属投研助手 v6.02
 Multi-Model + Tushare · 模块化架构
 """
 
@@ -35,7 +35,7 @@ import streamlit as st
 
 # ── Page Config ──────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="呆瓜方后援会专属投研助手 v6.01 🌸",
+    page_title="呆瓜方后援会专属投研助手 v6.02 🌸",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="auto",
@@ -74,7 +74,7 @@ def _show_login():
     import re
     st.markdown("""
 <div class="app-header">
-  <h1>📈 呆瓜方后援会专属投研助手 v6.01</h1>
+  <h1>📈 呆瓜方后援会专属投研助手 v6.02</h1>
   <p>预期差挖掘 · K线趋势研判 · 基本面剖析 · MoE多角色辩论裁决</p>
 </div>
 """, unsafe_allow_html=True)
@@ -195,7 +195,7 @@ def main():
     if not _upper_collapsed:
         st.markdown("""
 <div class="app-header">
-  <h1>📈 呆瓜方后援会专属投研助手 v6.01</h1>
+  <h1>📈 呆瓜方后援会专属投研助手 v6.02</h1>
   <p>预期差挖掘 · K线趋势研判 · 基本面剖析 · MoE多角色辩论裁决</p>
 </div>
 """, unsafe_allow_html=True)
@@ -420,28 +420,29 @@ def main():
 
         _stock_options = st.session_state["_stock_options"]
 
-        _search_col, _go_col, _reset_col = st.columns([4, 1.5, 1])
-        with _search_col:
-            if _stock_options:
-                # 如果有预加载候选，提供 selectbox（自带搜索过滤）
-                _default_idx = None
-                _prev_q = st.session_state.get("query_input", "")
-                if _prev_q and _prev_q in _stock_options:
-                    _default_idx = _stock_options.index(_prev_q)
-                query = st.selectbox(
-                    "搜索股票", options=_stock_options,
-                    index=_default_idx, label_visibility="collapsed",
-                    placeholder="🔍 输入股票代码或名称搜索…",
-                    key="query_input",
-                )
-            else:
-                query = st.text_input(
-                    "搜索股票", label_visibility="collapsed",
-                    placeholder="🔍 股票代码或名称…",
-                    key="query_input",
-                )
+        # 搜索框（独占一行）
+        if _stock_options:
+            _default_idx = None
+            _prev_q = st.session_state.get("query_input", "")
+            if _prev_q and _prev_q in _stock_options:
+                _default_idx = _stock_options.index(_prev_q)
+            query = st.selectbox(
+                "搜索股票", options=_stock_options,
+                index=_default_idx, label_visibility="collapsed",
+                placeholder="🔍 输入股票代码或名称搜索…",
+                key="query_input",
+            )
+        else:
+            query = st.text_input(
+                "搜索股票", label_visibility="collapsed",
+                placeholder="🔍 股票代码或名称…",
+                key="query_input",
+            )
+
+        # 按钮行（两列平分，和 Tab 按钮风格一致）
+        _go_col, _reset_col = st.columns(2)
         with _go_col:
-            _go_clicked = st.button(_go_label, type="secondary",
+            _go_clicked = st.button(_go_label, type="primary",
                                      use_container_width=True, key="btn_go",
                                      disabled=_go_disabled)
         with _reset_col:
