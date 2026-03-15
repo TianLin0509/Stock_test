@@ -155,12 +155,14 @@ def _run_parallel_with_heartbeat(keys, client, cfg_now, selected_model,
             elapsed = 0
             tip_idx = 0
 
+            done_count = 0
+            total = len(keys)
+
             while pending:
-                # 等待最多 2 秒，看有没有任务完成
-                done, pending = wait(pending, timeout=2, return_when=FIRST_COMPLETED)
+                # 等待最多 4 秒，看有没有任务完成
+                done, pending = wait(pending, timeout=4, return_when=FIRST_COMPLETED)
 
                 if done:
-                    # 有任务完成，处理结果
                     for fut in done:
                         k = futures[fut]
                         result, err, extra = fut.result()
@@ -168,15 +170,23 @@ def _run_parallel_with_heartbeat(keys, client, cfg_now, selected_model,
                             analyses[k] = result
                             st.session_state["analyses"] = analyses
                             _store_extra_data(extra)
-                        st.write(f"{'✅' if not err else '❌'} {label_map.get(k, k)} 完成")
+                        done_count += 1
+                        _lbl = label_map.get(k, k)
+                        if err:
+                            st.write(f"❌ {_lbl} 失败")
+                        elif pending:
+                            st.write(f"✅ **{_lbl}** 完成（{done_count}/{total}）"
+                                     f"— 分析结束后可点击按钮查看")
+                        else:
+                            st.write(f"✅ **{_lbl}** 完成（{done_count}/{total}）")
                 else:
-                    # 2 秒内无任务完成 → 输出心跳
-                    elapsed += 2
+                    # 4 秒内无任务完成 → 输出心跳
+                    elapsed += 4
                     tip = _HEARTBEAT_TIPS[min(tip_idx, len(_HEARTBEAT_TIPS) - 1)]
                     st.write(f"⏱️ 已等待 {elapsed}s — {tip}")
                     tip_idx += 1
 
-        status.update(label=f"✅ {status_label}完成！", state="complete")
+        status.update(label=f"✅ {status_label}完成！点击上方按钮查看结果", state="complete")
 
 
 def _run_single_analysis(key, label, client, cfg_now, selected_model, analyses):
@@ -241,8 +251,8 @@ def render_analysis_tab(client, cfg_now, selected_model, email_addr):
                 _btn_label = f"{icon} {label}"
 
             query = st.session_state.get("query_input", "")
-            # 分析进行中时禁用所有按钮
-            _disabled = _is_analyzing or (not stock_ready and not query)
+            # 分析进行中：已完成的按钮可点击查看，未完成的禁用
+            _disabled = (_is_analyzing and not done) or (not stock_ready and not query)
             if st.button(_btn_label, type=_btn_type,
                          use_container_width=True, key=f"btn_{key}",
                          disabled=_disabled):
@@ -268,7 +278,7 @@ def render_analysis_tab(client, cfg_now, selected_model, email_addr):
             _summary_label = "📊 总结"
         if st.button(_summary_label, type=_summary_type,
                      use_container_width=True, key="btn_summary",
-                     disabled=_is_analyzing or not core_all_done):
+                     disabled=not core_all_done):
             st.session_state["active_view"] = "summary"
             st.rerun()
 
