@@ -64,49 +64,63 @@ def _extract_conclusion(text: str, max_chars: int = 800) -> str:
     return text
 
 
+def _fmt_val(v) -> str:
+    """格式化指标值：None/N/A/空 → —，数字保留合理精度"""
+    if v is None or str(v).strip().lower() in ("none", "n/a", "nan", ""):
+        return "—"
+    try:
+        f = float(v)
+        return f"{f:.2f}" if abs(f) < 1000 else f"{f:.1f}"
+    except (ValueError, TypeError):
+        return str(v)[:14]
+
+
 def _show_stock_overview_basic():
-    """显示股票概览：仅指标卡片"""
+    """显示股票概览：紧凑一行式指标"""
     name = st.session_state["stock_name"]
     ts_code = st.session_state["stock_code"]
     info = st.session_state.get("stock_info", {})
+    code6 = to_code6(ts_code)
 
-    # 自选股状态按钮
-    _title_col, _fav_col = st.columns([5, 1.5])
+    # 自选股按钮（小图标式）
+    from utils.user_store import get_watchlist, add_to_watchlist, remove_from_watchlist
+    _cur_user = st.session_state.get("current_user", "")
+    _in_wl = any(item["stock_code"] == ts_code for item in get_watchlist(_cur_user))
+    _fav_icon = "⭐" if _in_wl else "☆"
+
+    _title_col, _fav_col = st.columns([6, 1])
     with _title_col:
-        st.markdown(f"### {name} &nbsp; `{to_code6(ts_code)}`")
+        st.markdown(f"### {name} &nbsp; `{code6}`")
     with _fav_col:
-        from utils.user_store import get_watchlist, add_to_watchlist, remove_from_watchlist
-        _cur_user = st.session_state.get("current_user", "")
-        _in_wl = any(item["stock_code"] == ts_code for item in get_watchlist(_cur_user))
         if _in_wl:
-            if st.button("➖ 移除自选", key="wl_remove_analysis", use_container_width=True):
-                _ok, _msg = remove_from_watchlist(_cur_user, ts_code)
-                st.toast(_msg)
-                if _ok:
-                    st.session_state.pop("_cached_user_data", None)
-                    st.rerun()
+            if st.button("⭐", key="wl_toggle", help="移除自选"):
+                remove_from_watchlist(_cur_user, ts_code)
+                st.session_state.pop("_cached_user_data", None)
+                st.rerun()
         else:
-            if st.button("➕ 加入自选", key="wl_add_analysis", use_container_width=True):
-                _ok, _msg = add_to_watchlist(_cur_user, ts_code, name)
-                st.toast(_msg)
-                if _ok:
-                    st.session_state.pop("_cached_user_data", None)
-                    st.rerun()
+            if st.button("☆", key="wl_toggle", help="加入自选"):
+                add_to_watchlist(_cur_user, ts_code, name)
+                st.session_state.pop("_cached_user_data", None)
+                st.rerun()
 
-    metrics = [
-        ("最新价", info.get("最新价(元)", "—")),
-        ("市盈率TTM", info.get("市盈率TTM", "—")),
-        ("市净率PB", info.get("市净率PB", "—")),
-        ("市销率PS", info.get("市销率PS", "—")),
-        ("换手率", info.get("换手率(%)", "—")),
-        ("行业", info.get("行业", "—")),
-    ]
-    r1 = st.columns(3)
-    for col, (label, val) in zip(r1, metrics[:3]):
-        with col: st.metric(label, str(val)[:14])
-    r2 = st.columns(3)
-    for col, (label, val) in zip(r2, metrics[3:]):
-        with col: st.metric(label, str(val)[:14])
+    # 紧凑指标条
+    _price = _fmt_val(info.get("最新价(元)"))
+    _pe = _fmt_val(info.get("市盈率TTM"))
+    _pb = _fmt_val(info.get("市净率PB"))
+    _turnover = _fmt_val(info.get("换手率(%)"))
+    _industry = info.get("行业", "—") or "—"
+
+    st.markdown(
+        f'<div style="display:flex;flex-wrap:wrap;gap:6px 16px;font-size:0.85rem;'
+        f'color:#374151;margin:2px 0 8px 0;">'
+        f'<span><b>¥{_price}</b></span>'
+        f'<span>PE <b>{_pe}</b></span>'
+        f'<span>PB <b>{_pb}</b></span>'
+        f'<span>换手 <b>{_turnover}%</b></span>'
+        f'<span>{_industry}</span>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
 
 
 def _extract_session_data():
@@ -212,15 +226,13 @@ def _poll_bg_analysis():
     done_count = len(done_keys)
 
     if bg["finished"]:
-        # 全部完成 → 显示完成状态，清理
-        with st.status(f"✅ 分析完成！点击上方按钮查看结果", expanded=False, state="complete") as status:
-            for k in done_keys:
-                _lbl = label_map.get(k, k)
-                if k in errors:
-                    st.write(f"❌ {_lbl} 失败：{errors[k]}")
-                else:
-                    st.write(f"✅ {_lbl} 完成")
+        # 全部完成 → 清理状态，按钮已自动显示 ✅，无需额外提示
         st.session_state.pop("_bg_analysis", None)
+        st.session_state.pop("_bg_tip_idx", None)
+        # 有错误时简短提示
+        if errors:
+            for k, err in errors.items():
+                st.toast(f"❌ {label_map.get(k, k)} 失败：{err}")
         # 深度分析完成时设置 auto_sim
         if any(k in ("sentiment", "sector", "holders") for k in bg["keys"]):
             st.session_state["_auto_sim"] = True
@@ -371,51 +383,28 @@ def render_analysis_tab(client, cfg_now, selected_model, email_addr):
     if _bg_running:
         _poll_bg_analysis()  # 会 sleep(4) + st.rerun() 直到 finished
 
-    # ── 紧凑状态栏 ──────────────────────────────────────────
+    # ── 状态栏：仅在缓存来源或分析中时显示 ──────────────────
     active_view = st.session_state.get("active_view", "overview")
-    _name_map = {"expectation": "预期差", "trend": "趋势", "fundamentals": "基本面"}
+    _shared_from = st.session_state.get("_shared_from")
 
-    if stock_ready and any(analyses.get(k) for k in CORE_KEYS):
-        _status_parts = []
-        for k in CORE_KEYS:
-            if analyses.get(k):
-                _status_parts.append(f'<span style="color:#16a34a;">✅{_name_map[k]}</span>')
-            else:
-                _status_parts.append(f'<span style="color:#9ca3af;">⬜{_name_map[k]}</span>')
-
-        _deep_map = {"sentiment": "舆情", "sector": "板块", "holders": "股东"}
-        if any(analyses.get(k) for k in DEEP_KEYS):
-            for dk in DEEP_KEYS:
-                if analyses.get(dk):
-                    _status_parts.append(f'<span style="color:#16a34a;">✅{_deep_map[dk]}</span>')
-
-        # 缓存来源标识
-        _shared_from = st.session_state.get("_shared_from")
-        if _shared_from:
-            _status_parts.append(
-                f'<span style="color:#f59e0b;">📦 缓存 · {_shared_from}</span>'
-            )
-
-        _status_line = " &nbsp;|&nbsp; ".join(_status_parts)
+    if _shared_from and stock_ready:
         st.markdown(
-            f'<div style="font-size:0.75rem;color:#6b7280;margin:4px 0;">{_status_line}</div>',
+            f'<div style="font-size:0.75rem;color:#f59e0b;margin:4px 0;">'
+            f'📦 缓存来源：{_shared_from}</div>',
             unsafe_allow_html=True,
         )
-
-        # 缓存时显示"重新分析"按钮
-        if _shared_from:
-            if st.button("🔄 忽略缓存，重新分析", key="btn_redo_fresh",
-                         type="primary", use_container_width=True):
-                st.session_state.pop("_shared_from", None)
-                st.session_state["analyses"] = {}
-                st.session_state.pop("moe_results", None)
-                st.session_state.pop("similarity_results", None)
-                st.session_state.pop("_auto_sim", None)
-                st.session_state.pop("_analyses_saved_keys", None)
-                if client:
-                    _run_core_analysis_all(client, cfg_now, selected_model)
-                st.session_state["active_view"] = "overview"
-                st.rerun()
+        if st.button("🔄 忽略缓存，重新分析", key="btn_redo_fresh",
+                     type="primary", use_container_width=True):
+            st.session_state.pop("_shared_from", None)
+            st.session_state["analyses"] = {}
+            st.session_state.pop("moe_results", None)
+            st.session_state.pop("similarity_results", None)
+            st.session_state.pop("_auto_sim", None)
+            st.session_state.pop("_analyses_saved_keys", None)
+            if client:
+                _run_core_analysis_all(client, cfg_now, selected_model)
+            st.session_state["active_view"] = "overview"
+            st.rerun()
 
     st.markdown("---")
 
@@ -531,6 +520,20 @@ def _render_overview(client, cfg_now, analyses, core_all_done, current_user):
   ⚠️ <strong>AI 模型暂不可用</strong>：{ai_err}，请在左侧切换其他模型。
 </div>""", unsafe_allow_html=True)
 
+    # ── 分析完成时直接显示核心结论摘要 ──
+    if core_all_done:
+        render_radar_section()
+        _summary_items = [
+            ("expectation", "🔍 预期差"),
+            ("trend", "📈 趋势研判"),
+            ("fundamentals", "📋 基本面"),
+        ]
+        for key, title in _summary_items:
+            text = analyses.get(key, "")
+            if text:
+                conclusion = _extract_conclusion(text, max_chars=600)
+                with st.expander(title, expanded=False):
+                    st.markdown(conclusion)
 
 
 def _render_expectation(analyses):
