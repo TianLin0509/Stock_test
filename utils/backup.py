@@ -216,20 +216,36 @@ def run_daily_backup():
     return results
 
 
+def _already_backed_up_today() -> bool:
+    """检查今天是否已经执行过备份（通过日志文件判断）"""
+    log_file = ARCHIVE_DIR / "_backup_log.txt"
+    if not log_file.exists():
+        return False
+    today_str = date.today().isoformat()
+    try:
+        # 只读最后 2KB，避免大文件性能问题
+        content = log_file.read_text(encoding="utf-8")[-2048:]
+        return today_str in content
+    except Exception:
+        return False
+
+
 def _backup_scheduler():
-    """后台线程：每天12:00执行备份"""
+    """后台线程：每天12:00执行备份（同一天只执行一次）"""
     while True:
         now = datetime.now()
         # 计算到下一个12:00的秒数
         target = now.replace(hour=12, minute=0, second=0, microsecond=0)
         if now >= target:
-            # 今天12:00已过，等明天
             from datetime import timedelta
             target += timedelta(days=1)
         wait_seconds = (target - now).total_seconds()
         _time.sleep(wait_seconds)
 
-        # 执行备份
+        # 检查今日是否已备份（防止多进程重复执行）
+        if _already_backed_up_today():
+            continue
+
         try:
             run_daily_backup()
         except Exception:
