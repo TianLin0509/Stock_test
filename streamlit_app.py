@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-📈 呆瓜方后援会专属投研助手 v6.02
+📈 呆瓜方后援会专属投研助手 v6.03
 Multi-Model + Tushare · 模块化架构
 """
 
@@ -35,7 +35,7 @@ import streamlit as st
 
 # ── Page Config ──────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="呆瓜方后援会专属投研助手 v6.02 🌸",
+    page_title="呆瓜方后援会专属投研助手 v6.03 🌸",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="auto",
@@ -74,7 +74,7 @@ def _show_login():
     import re
     st.markdown("""
 <div class="app-header">
-  <h1>📈 呆瓜方后援会专属投研助手 v6.02</h1>
+  <h1>📈 呆瓜方后援会专属投研助手 v6.03</h1>
   <p>预期差挖掘 · K线趋势研判 · 基本面剖析 · MoE多角色辩论裁决</p>
 </div>
 """, unsafe_allow_html=True)
@@ -195,7 +195,7 @@ def main():
     if not _upper_collapsed:
         st.markdown("""
 <div class="app-header">
-  <h1>📈 呆瓜方后援会专属投研助手 v6.02</h1>
+  <h1>📈 呆瓜方后援会专属投研助手 v6.03</h1>
   <p>预期差挖掘 · K线趋势研判 · 基本面剖析 · MoE多角色辩论裁决</p>
 </div>
 """, unsafe_allow_html=True)
@@ -616,6 +616,7 @@ def main():
                     st.session_state["_pending_core_analysis"] = True
 
             st.session_state["active_view"] = "overview"
+            st.session_state["_upper_collapsed"] = True  # 折叠顶部，留空间给分析输出
             st.rerun()
 
     # ══════════════════════════════════════════════════════════════════════
