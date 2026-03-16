@@ -4,10 +4,16 @@
   "last_login": "2026-03-16T08:59:38",
   "preferences": {},
   "token_usage": {
-    "total": 0,
-    "prompt": 0,
-    "completion": 0,
-    "daily": {}
+    "total": 15554,
+    "prompt": 11367,
+    "completion": 4187,
+    "daily": {
+      "2026-03-16": {
+        "prompt": 11367,
+        "completion": 4187,
+        "total": 15554
+      }
+    }
   },
   "history": [
     {
