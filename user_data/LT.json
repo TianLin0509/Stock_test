@@ -4,7 +4,7 @@
   "last_login": "2026-03-17T01:06:08",
   "preferences": {},
   "token_usage": {
-    "total": 72636,
+    "total": 80884,
     "prompt": 0,
     "completion": 0,
     "daily": {
@@ -21,7 +21,7 @@
       "2026-03-17": {
         "prompt": 0,
         "completion": 0,
-        "total": 9201
+        "total": 17449
       }
     }
   },
