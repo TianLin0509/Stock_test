@@ -1,17 +1,37 @@
 {
   "username": "oK6mY2wd2Lc62DGAIPXnw5-S2obg",
-  "created_at": "2026-03-25T01:56:03",
-  "last_login": "2026-03-25T01:56:03",
+  "created_at": "2026-03-19T00:03:13",
+  "last_login": "2026-03-19T00:03:13",
   "preferences": {},
   "token_usage": {
-    "total": 31705,
+    "total": 890074,
     "prompt": 0,
     "completion": 0,
     "daily": {
+      "2026-03-19": {
+        "prompt": 0,
+        "completion": 0,
+        "total": 613325
+      },
+      "2026-03-22": {
+        "prompt": 0,
+        "completion": 0,
+        "total": 148659
+      },
+      "2026-03-23": {
+        "prompt": 0,
+        "completion": 0,
+        "total": 66689
+      },
+      "2026-03-24": {
+        "prompt": 0,
+        "completion": 0,
+        "total": 29883
+      },
       "2026-03-25": {
         "prompt": 0,
         "completion": 0,
-        "total": 31705
+        "total": 31518
       }
     }
   },
