@@ -1,0 +1,20 @@
+{
+  "username": "night_audit",
+  "created_at": "2026-03-25T02:07:54",
+  "last_login": "2026-03-25T02:07:54",
+  "preferences": {},
+  "token_usage": {
+    "total": 31245,
+    "prompt": 0,
+    "completion": 0,
+    "daily": {
+      "2026-03-25": {
+        "prompt": 0,
+        "completion": 0,
+        "total": 31245
+      }
+    }
+  },
+  "history": [],
+  "favorites": []
+}
